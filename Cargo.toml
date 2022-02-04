@@ -2,6 +2,7 @@
 name = "tqdm"
 version = "0.1.0"
 edition = "2018"
+authors = ["yihengdu"]
 
 repository = "https://github.com/mrlazy1708/tqdm"
 license = "MIT OR Apache-2.0"
