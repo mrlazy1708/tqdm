@@ -1,0 +1,13 @@
+# OS #
+######
+.DS_Store
+
+# RUST #
+########
+/target
+Cargo.lock
+
+# PYTHON #
+##########
+/__pycache__
+reference.py
