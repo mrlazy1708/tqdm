@@ -8,6 +8,7 @@ repository = "https://github.com/mrlazy1708/tqdm"
 license = "MIT OR Apache-2.0"
 keywords = ["tqdm", "progress", "iterator"]
 categories = ["accessibility", "command-line-utilities"]
+description = "Python tqdm in Rust"
 
 [dependencies]
 termion = "1.5.6"
