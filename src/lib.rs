@@ -17,10 +17,10 @@ use std::time::*;
 /// Wrap [Iterator] like it in Python. Returns [Tqdm](crate::Tqdm).
 ///
 /// ## Default
-/// - [style](crate::Tqdm::style): `"block".to_string()`
+/// - [style](crate::Tqdm::style): `"block"`
 /// - [width](crate::Tqdm::width): `None`
 ///
-pub fn tqdm<Item: 'static, Iter: Iterator<Item = Item> + 'static>(iter: Iter) -> Tqdm<Item, Iter> {
+pub fn tqdm<Item, Iter: Iterator<Item = Item>>(iter: Iter) -> Tqdm<Item, Iter> {
     let data = Arc::new(Mutex::new(TqdmData {
         start: SystemTime::now(),
 
@@ -30,6 +30,9 @@ pub fn tqdm<Item: 'static, Iter: Iterator<Item = Item> + 'static>(iter: Iter) ->
         style: "block".to_string(),
         width: None,
     }));
+
+    use termion::cursor;
+    print!("{}", cursor::Goto(1, terminal_size().1));
     TQDM.lock().unwrap().push(data.clone());
 
     Tqdm {
@@ -130,8 +133,10 @@ impl<Item, Iter: Iterator<Item = Item>> Iterator for Tqdm<Item, Iter> {
             self.step += 1
         }
 
-        let duration = SystemTime::now().duration_since(self.prev).unwrap();
-        if duration > Duration::from_millis(40) {
+        let now = SystemTime::now();
+        if now.duration_since(self.prev).unwrap() > Duration::from_millis(40) {
+            self.prev = now;
+
             {
                 let mut data = self.data.lock().unwrap();
                 data.step = self.step;
@@ -141,12 +146,18 @@ impl<Item, Iter: Iterator<Item = Item>> Iterator for Tqdm<Item, Iter> {
             {
                 let tqdms = TQDM.lock().unwrap();
 
-                use termion::{cursor, terminal_size};
-                let height = terminal_size().unwrap().1;
-                let height = height - (tqdms.len() as u16).min(height - 1);
-                print!("{}", cursor::Goto(1, height));
+                let (ncol, nrow) = terminal_size();
+                let top = nrow.checked_sub(tqdms.len() as u16).unwrap_or(0);
 
-                tqdms.iter().for_each(|data| data.lock().unwrap().print());
+                use termion::cursor;
+                print!("{}", cursor::Goto(1, top + 1));
+                tqdms.iter().take(nrow as usize - 1).for_each(|data| {
+                    print!(
+                        "{:ncol$}",
+                        data.lock().unwrap().print(),
+                        ncol = ncol as usize
+                    )
+                });
             }
 
             use std::io::Write;
@@ -174,12 +185,12 @@ impl<Item, Iter: Iterator<Item = Item>> Drop for Tqdm<Item, Iter> {
     fn drop(&mut self) {
         let mut tqdms = TQDM.lock().unwrap();
 
-        use termion::{cursor, terminal_size};
-        let height = terminal_size().unwrap().1;
-        let height = height - (tqdms.len() as u16).min(height - 1);
-        print!("{}", cursor::Goto(1, height));
+        let nrows = terminal_size().1;
+        let top = nrows.checked_sub(tqdms.len() as u16).unwrap_or(0);
 
-        self.data.lock().unwrap().print();
+        use termion::cursor;
+        print!("{}", cursor::Goto(1, top + 1));
+        println!("{}", self.data.lock().unwrap().print());
 
         tqdms.retain(|this| !Arc::ptr_eq(this, &self.data));
     }
@@ -195,6 +206,19 @@ lazy_static! {
     static ref TQDM: Mutex<Vec<Arc<Mutex<TqdmData>>>> = Mutex::new(Vec::new());
 }
 
+fn terminal_size() -> (u16, u16) {
+    use termion::terminal_size;
+    terminal_size().unwrap()
+}
+
+fn format_time(mut duration: usize) -> String {
+    duration = duration / 1000;
+    match duration / 3600 {
+        0 => format!("{:02}:{:02}", duration / 60 % 60, duration % 60),
+        x => format!("{:02}:{:02}:{:02}", x, duration / 60 % 60, duration % 60),
+    }
+}
+
 struct TqdmData {
     start: SystemTime,
     step: usize,
@@ -205,14 +229,6 @@ struct TqdmData {
 }
 
 impl TqdmData {
-    fn time(&self, mut duration: usize) -> String {
-        duration = duration / 1000;
-        match duration / 3600 {
-            0 => format!("{:02}:{:02}", duration / 60 % 60, duration % 60),
-            x => format!("{:02}:{:02}:{:02}", x, duration / 60 % 60, duration % 60),
-        }
-    }
-
     fn full(&self, length: usize) -> String {
         match self.style.as_str() {
             "ascii" => "#",
@@ -233,7 +249,7 @@ impl TqdmData {
         .unwrap()
     }
 
-    fn print(&self) {
+    fn print(&self) -> String {
         let elapsed = SystemTime::now()
             .duration_since(self.start)
             .as_ref()
@@ -248,27 +264,25 @@ impl TqdmData {
                 let progress = (100.0 * percent) as usize;
                 let head = format!("{:>3}%|", progress);
 
-                let time = self.time(elapsed as usize);
-                let eta = self.time(elapsed as usize * remain / step);
+                let time = format_time(elapsed as usize);
+                let eta = format_time(elapsed as usize * remain / step);
                 let rate = step as f64 / elapsed as f64 * 1000.0;
                 let tail = format!("| {}/{} [{}<{}, {:.02}it/s]", step, total, time, eta, rate);
 
-                use termion::terminal_size;
-                let width = terminal_size().ok().unwrap().0;
-                let width = self.width.unwrap_or(width as usize);
+                let width = self.width.unwrap_or_else(|| terminal_size().0 as usize);
                 let length = width.checked_sub(head.len() + tail.len()).unwrap_or(0);
                 let mut body = self.full((length as f64 * percent) as usize);
                 body.push(self.edge((length as f64 * percent).fract()));
 
                 let body: String = body.chars().take(length).collect();
-                println!("{}{:length$}{}", head, body, tail, length = length);
+                format!("{}{:length$}{}", head, body, tail, length = length)
             }
 
             None => {
                 let step = self.step;
-                let time = self.time(elapsed as usize);
+                let time = format_time(elapsed as usize);
                 let rate = step as f64 / elapsed as f64 * 1000.0;
-                println!("{}it [{}, {:.02}it/s]", step, time, rate);
+                format!("{}it [{}, {:.02}it/s]", step, time, rate)
             }
         }
     }
@@ -324,5 +338,26 @@ mod tests {
         for handle in threads {
             handle.join().unwrap();
         }
+    }
+
+    #[test]
+    fn performance() {
+        let ntest = 100000000;
+
+        let start = SystemTime::now();
+        for _i in 0..ntest {}
+        println!(
+            "Baseline: {:.02}it/s",
+            ntest as f64 / SystemTime::now().duration_since(start).unwrap().as_millis() as f64
+                * 1000.0
+        );
+
+        let start = SystemTime::now();
+        for _i in tqdm(0..ntest) {}
+        println!(
+            "Tqdm: {:.02}it/s",
+            ntest as f64 / SystemTime::now().duration_since(start).unwrap().as_millis() as f64
+                * 1000.0
+        );
     }
 }
