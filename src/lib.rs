@@ -1,3 +1,12 @@
+//! Rust implementation of Python command line progress bar tool [tqdm](https://github.com/tqdm/tqdm/).
+//!
+//! From original documentation:
+//! > tqdm derives from the Arabic word taqaddum (تقدّم) which can mean "progress," and is an abbreviation for "I love you so much" in Spanish (te quiero demasiado).
+//! > Instantly make your loops show a smart progress meter - just wrap any iterable with tqdm(iterable), and you're done!
+//!
+//! This crate provides a wrapper [Iterator]. It controls multiple progress bars when `next` is called.
+//! Most traits are bypassed with [auto-dereference](https://doc.rust-lang.org/std/ops/trait.Deref.html), so original methods can be called with no overhead.
+
 use std::sync::*;
 use std::time::*;
 
@@ -5,6 +14,12 @@ use std::time::*;
 /*                                   PUBLIC                                   */
 /* -------------------------------------------------------------------------- */
 
+/// Wrap [Iterator] like it in Python. Returns [Tqdm](crate::Tqdm).
+///
+/// ## Default
+/// - [style](crate::Tqdm::style): `"block".to_string()`
+/// - [width](crate::Tqdm::width): `None`
+///
 pub fn tqdm<Item: 'static, Iter: Iterator<Item = Item> + 'static>(iter: Iter) -> Tqdm<Item, Iter> {
     let data = Arc::new(Mutex::new(TqdmData {
         start: SystemTime::now(),
@@ -27,6 +42,40 @@ pub fn tqdm<Item: 'static, Iter: Iterator<Item = Item> + 'static>(iter: Iter) ->
     }
 }
 
+/// Iterator wrapper. Updates progress bar when `next` is called on it.
+///
+/// ## Examples
+///
+/// - Basic Usage
+/// ```
+/// for _i in tqdm(0..100) {
+///     thread::sleep(Duration::from_millis(10));
+/// }
+/// ```
+///
+/// - Composition
+/// ```
+/// for _i in tqdm(tqdm(0..100).take(50)) {
+///     thread::sleep(Duration::from_millis(10));
+/// }
+/// ```
+///
+/// - Multi-threading
+/// ```
+/// let threads: Vec<_> = [200, 400, 100].iter().map(|its| {
+///         std::thread::spawn(move || {
+///             for _i in tqdm(0..*its) {
+///                 thread::sleep(Duration::from_millis(10));
+///             }
+///         })
+///     })
+///     .collect();
+///
+/// for handle in threads {
+///     handle.join().unwrap();
+/// }
+/// ```
+///
 pub struct Tqdm<Item, Iter: Iterator<Item = Item>> {
     iter: Iter,
     data: Arc<Mutex<TqdmData>>,
@@ -37,11 +86,36 @@ pub struct Tqdm<Item, Iter: Iterator<Item = Item>> {
 }
 
 impl<Item, Iter: Iterator<Item = Item>> Tqdm<Item, Iter> {
+    /// Configure progress bar style with its name.
+    ///
+    /// * `style` - name of the style
+    ///     - `"ascii"`: Pure ascii bar with `"0123456789#"`.
+    ///     - `"block"`: Common bar with unicode characters `" ▏▎▍▌▋▊▉█"`.
+    ///     - `"bubble"`: Simulate bubble explosion with `".oO@*"`. Inspired by [stackoverflow](https://stackoverflow.com/a/2685509/17570263).
+    ///
+    ///     Other styles are open for [contribution](https://github.com/mrlazy1708/tqdm/issues/1).
+    ///
+    /// ## Examples
+    /// ```
+    /// tqdm(0..100).style("bubble")
+    /// ```
+    ///
     pub fn style(self, style: &str) -> Self {
         self.data.lock().unwrap().style = style.to_string();
         self
     }
 
+    /// Configure progress bar width.
+    ///
+    /// * `width` - width limitation
+    ///     - `Some(usize)`: Fixed width regardless of terminal size.
+    ///     - `None`: Expand to whole terminal width.
+    ///
+    /// ## Examples
+    /// ```
+    /// tqdm(0..100).width(Some(100))
+    /// ```
+    ///
     pub fn width(self, width: Option<usize>) -> Self {
         self.data.lock().unwrap().width = width;
         self

@@ -1,14 +1,17 @@
 [package]
 name = "tqdm"
-version = "0.1.1"
+version = "0.2.0"
 edition = "2018"
-authors = ["yihengdu"]
+readme = "README.md"
 
-repository = "https://github.com/mrlazy1708/tqdm"
 license = "MIT OR Apache-2.0"
+description = "Python tqdm in Rust"
+repository = "https://github.com/mrlazy1708/tqdm"
+documentation = "https://docs.rs/tqdm/latest/tqdm"
+
+authors = ["yihengdu"]
 keywords = ["tqdm", "progress", "iterator"]
 categories = ["accessibility", "command-line-utilities"]
-description = "Python tqdm in Rust"
 
 [dependencies]
 lazy_static = "1.4.0"
