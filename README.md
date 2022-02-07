@@ -35,6 +35,20 @@ for i in tqdm(0..10000) {
 
 
 
+Expose trait to allow method chaining
+
+```rust
+use tqdm::Iter;
+for i in (0..).take(10000).tqdm().style("balloon") {
+  ...
+```
+
+```
+ 47%|**********.          | 4792/10000 [00:06<00:06, 783.39it/s]
+```
+
+
+
 Multi-threading is also supported!
 
 ```rust
@@ -51,6 +65,7 @@ for t in (0..3) {
  77%|████████████████████      | 77/100 [00:00<00:00, 83.24it/s]
  19%|*****.                    | 77/400 [00:00<00:03, 83.24it/s]
 ```
+
 
 
 For more usage, please refer to [doc](https://docs.rs/tqdm/latest/tqdm)

@@ -6,6 +6,7 @@
 //!
 //! This crate provides a wrapper [Iterator]. It controls multiple progress bars when `next` is called.
 //! Most traits are bypassed with [auto-dereference](https://doc.rust-lang.org/std/ops/trait.Deref.html), so original methods can be called with no overhead.
+//! 
 
 use std::sync::*;
 use std::time::*;
@@ -112,13 +113,13 @@ impl<Item, Iter: Iterator<Item = Item>> Tqdm<Item, Iter> {
     /// * `style` - name of the style
     ///     - `"ascii"`: Pure ascii bar with `"0123456789#"`.
     ///     - `"block"`: Common bar with unicode characters `" ▏▎▍▌▋▊▉█"`.
-    ///     - `"bubble"`: Simulate bubble explosion with `".oO@*"`. Inspired by [stackoverflow](https://stackoverflow.com/a/2685509/17570263).
+    ///     - `"balloon"`: Simulate balloon explosion with `".oO@*"`. Inspired by [stackoverflow](https://stackoverflow.com/a/2685509/17570263).
     ///
     ///     Other styles are open for [contribution](https://github.com/mrlazy1708/tqdm/issues/1).
     ///
     /// ## Examples
     /// ```
-    /// tqdm(0..100).style("bubble")
+    /// tqdm(0..100).style("balloon")
     /// ```
     ///
     pub fn style(self, style: &str) -> Self {
