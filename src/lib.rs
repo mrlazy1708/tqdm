@@ -45,6 +45,24 @@ pub fn tqdm<Item, Iter: Iterator<Item = Item>>(iter: Iter) -> Tqdm<Item, Iter> {
     }
 }
 
+/// Public trait that allow `.tqdm()` method chaining. Equivalent to `tqdm::tqdm(iter)`.
+///
+/// ## Examples
+/// ```
+/// use tqdm::Iter;
+/// (0..).take(1000).tqdm()
+/// ```
+///
+pub trait Iter<Item>: Iterator<Item = Item> {
+    fn tqdm(self) -> Tqdm<Item, Self>
+    where
+        Self: Sized,
+    {
+        tqdm(self)
+    }
+}
+impl<Item, Iter: Iterator<Item = Item>> crate::Iter<Item> for Iter {}
+
 /// Iterator wrapper. Updates progress bar when `next` is called on it.
 ///
 /// ## Examples
@@ -295,6 +313,13 @@ impl TqdmData {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn chain() {
+        for _i in (0..).take(1000).tqdm().take(500).tqdm() {
+            std::thread::sleep(Duration::from_millis(10));
+        }
+    }
 
     #[test]
     fn range() {
