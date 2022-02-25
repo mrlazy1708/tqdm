@@ -1,7 +1,7 @@
 [package]
 name = "tqdm"
-version = "0.3.0"
-edition = "2018"
+edition = "2021"
+version = "0.3.1"
 readme = "README.md"
 
 license = "MIT OR Apache-2.0"
@@ -14,5 +14,5 @@ keywords = ["tqdm", "progress", "iterator"]
 categories = ["accessibility", "command-line-utilities"]
 
 [dependencies]
-lazy_static = "1.4.0"
-termion = "1.5.6"
+termion = "^1.5"
+lazy_static = "^1.4"

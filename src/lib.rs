@@ -6,7 +6,7 @@
 //!
 //! This crate provides a wrapper [Iterator]. It controls multiple progress bars when `next` is called.
 //! Most traits are bypassed with [auto-dereference](https://doc.rust-lang.org/std/ops/trait.Deref.html), so original methods can be called with no overhead.
-//! 
+//!
 
 use std::sync::*;
 use std::time::*;
@@ -18,7 +18,7 @@ use std::time::*;
 /// Wrap [Iterator] like it in Python. Returns [Tqdm](crate::Tqdm).
 ///
 /// ## Default
-/// - [style](crate::Tqdm::style): `"block"`
+/// - [style](crate::Tqdm::style): `Style::Block`
 /// - [width](crate::Tqdm::width): `None`
 ///
 pub fn tqdm<Item, Iter: Iterator<Item = Item>>(iter: Iter) -> Tqdm<Item, Iter> {
@@ -28,7 +28,7 @@ pub fn tqdm<Item, Iter: Iterator<Item = Item>>(iter: Iter) -> Tqdm<Item, Iter> {
         step: 0,
         size: None,
 
-        style: "block".to_string(),
+        style: Style::Block,
         width: None,
     }));
 
@@ -107,23 +107,32 @@ pub struct Tqdm<Item, Iter: Iterator<Item = Item>> {
     size: Option<usize>,
 }
 
+/// Progress bar style enumeration.
+/// 
+/// - `Ascii`: Pure ascii bar with `"0123456789#"`.
+/// - `Block`: Common bar with unicode characters `" ▏▎▍▌▋▊▉█"`.
+/// - `Balloon`: Simulate balloon explosion with `".oO@*"`. Inspired by [stackoverflow](https://stackoverflow.com/a/2685509/17570263).
+/// 
+/// Other styles are open for [contribution](https://github.com/mrlazy1708/tqdm/issues/1).
+///
+pub enum Style {
+    Ascii,
+    Block,
+    Balloon,
+}
+
 impl<Item, Iter: Iterator<Item = Item>> Tqdm<Item, Iter> {
     /// Configure progress bar style with its name.
     ///
-    /// * `style` - name of the style
-    ///     - `"ascii"`: Pure ascii bar with `"0123456789#"`.
-    ///     - `"block"`: Common bar with unicode characters `" ▏▎▍▌▋▊▉█"`.
-    ///     - `"balloon"`: Simulate balloon explosion with `".oO@*"`. Inspired by [stackoverflow](https://stackoverflow.com/a/2685509/17570263).
-    ///
-    ///     Other styles are open for [contribution](https://github.com/mrlazy1708/tqdm/issues/1).
+    /// * `style` - enum of the style
     ///
     /// ## Examples
     /// ```
-    /// tqdm(0..100).style("balloon")
+    /// tqdm(0..100).style(Style::Balloon)
     /// ```
     ///
-    pub fn style(self, style: &str) -> Self {
-        self.data.lock().unwrap().style = style.to_string();
+    pub fn style(self, style: Style) -> Self {
+        self.data.lock().unwrap().style = style;
         self
     }
 
@@ -243,27 +252,25 @@ struct TqdmData {
     step: usize,
     size: Option<usize>,
 
-    style: String,
+    style: Style,
     width: Option<usize>,
 }
 
 impl TqdmData {
     fn full(&self, length: usize) -> String {
-        match self.style.as_str() {
-            "ascii" => "#",
-            "block" => "█",
-            "balloon" => "*",
-            unknown => panic!("unknown style '{}'", unknown),
+        match self.style {
+            Style::Ascii => "#",
+            Style::Block => "█",
+            Style::Balloon => "*",
         }
         .repeat(length)
     }
 
     fn edge(&self, frac: f64) -> char {
-        match self.style.as_str() {
-            "ascii" => "0123456789".chars().nth((10.0 * frac) as usize),
-            "block" => " ▏▎▍▌▋▊▉".chars().nth((8.0 * frac) as usize),
-            "balloon" => ".oO@".chars().nth((4.0 * frac) as usize),
-            unknown => panic!("unknown style '{}'", unknown),
+        match self.style {
+            Style::Ascii => "0123456789".chars().nth((10.0 * frac) as usize),
+            Style::Block => " ▏▎▍▌▋▊▉".chars().nth((8.0 * frac) as usize),
+            Style::Balloon => ".oO@".chars().nth((4.0 * frac) as usize),
         }
         .unwrap()
     }
@@ -351,16 +358,18 @@ mod tests {
 
     #[test]
     fn parallel() {
-        let threads: Vec<_> = [(200, "ascii"), (400, "balloon"), (100, "block")]
-            .iter()
-            .map(|(its, style)| {
-                std::thread::spawn(move || {
-                    for _i in tqdm(0..*its).style(style).width(Some(82)) {
-                        std::thread::sleep(Duration::from_millis(10));
-                    }
-                })
+        let threads = [
+            (200, Style::Ascii),
+            (400, Style::Balloon),
+            (100, Style::Block),
+        ]
+        .map(|(its, style)| {
+            std::thread::spawn(move || {
+                for _i in tqdm(0..its).style(style).width(Some(82)) {
+                    std::thread::sleep(Duration::from_millis(10));
+                }
             })
-            .collect();
+        });
         for handle in threads {
             handle.join().unwrap();
         }
