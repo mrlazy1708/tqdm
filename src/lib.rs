@@ -25,8 +25,9 @@ pub fn tqdm<Item, Iter: Iterator<Item = Item>>(iter: Iter) -> Tqdm<Item, Iter> {
     let data = Data {
         start: SystemTime::now(),
 
-        style: Style::Block,
+        desc: None,
         width: None,
+        style: Style::Block,
 
         step: 0,
         total: iter.size_hint().1,
@@ -141,17 +142,19 @@ impl<Item, Iter: Iterator<Item = Item>> Tqdm<Item, Iter> {
         self
     }
 
-    /// Configure progress bar style with its name.
+    /// Configure progress bar's name.
     ///
-    /// * `style` - enum of the style
+    /// * `desc` - bar description
+    ///     - `Some(usize)`: Named progress bar.
+    ///     - `None`: Anonymous.
     ///
     /// ## Examples
     /// ```
-    /// tqdm(0..100).style(Style::Balloon)
+    /// tqdm(0..100).desc(Some("Bar1"))
     /// ```
     ///
-    pub fn style(mut self, style: Style) -> Self {
-        self.data.style = style;
+    pub fn desc(mut self, desc: Option<&str>) -> Self {
+        self.data.desc = desc.map(str::to_string);
         self
     }
 
@@ -168,6 +171,20 @@ impl<Item, Iter: Iterator<Item = Item>> Tqdm<Item, Iter> {
     ///
     pub fn width(mut self, width: Option<usize>) -> Self {
         self.data.width = width;
+        self
+    }
+
+    /// Configure progress bar style with its name.
+    ///
+    /// * `style` - enum of the style
+    ///
+    /// ## Examples
+    /// ```
+    /// tqdm(0..100).style(Style::Balloon)
+    /// ```
+    ///
+    pub fn style(mut self, style: Style) -> Self {
+        self.data.style = style;
         self
     }
 }
@@ -287,6 +304,7 @@ fn refresh_all() {
 struct Data {
     start: SystemTime,
 
+    desc: Option<String>,
     width: Option<usize>,
     style: Style,
 
@@ -314,28 +332,34 @@ impl std::fmt::Display for Data {
             .or_else(|| fmt.width())
             .unwrap_or_else(|| display_size().0);
 
+        let desc = match &self.desc {
+            Some(desc) => format!("{}: ", desc),
+            None => "".to_string(),
+        };
+
         let format_time = |seconds| match seconds / 3600 {
             0 => format!("{:02}:{:02}", seconds / 60 % 60, seconds % 60),
             x => format!("{:02}:{:02}:{:02}", x, seconds / 60 % 60, seconds % 60),
         };
 
+        let it = self.step;
         let et = format_time(elapsed / 1000);
-        let rate = self.step as f64 / elapsed as f64 * 1000.0;
+        let rate = it as f64 / elapsed as f64 * 1000.0;
         match self.total {
-            None => fmt.write_fmt(format_args!("{}it [{}, {:.02}it/s]", self.step, et, rate)),
+            None => fmt.write_fmt(format_args!("{}{}it [{}, {:.02}it/s]", desc, it, et, rate)),
             Some(tot) => {
-                let pct = (self.step as f64 / tot as f64).clamp(0.0, 1.0);
-                let rem = tot.checked_sub(self.step).unwrap_or(0);
-                let eta = match self.step {
+                let pct = (it as f64 / tot as f64).clamp(0.0, 1.0);
+                let rem = tot.checked_sub(it).unwrap_or(0);
+                let eta = match it {
                     0 => "?".to_string(),
                     x => format_time(elapsed * rem / x / 1000),
                 };
 
-                let head = format!("{:>3}%|", (100.0 * pct) as usize);
-                let tail = format!("| {}/{} [{}<{}, {:.02}it/s]", self.step, tot, et, eta, rate);
+                let head = format!("{}{:>3}%|", desc, (100.0 * pct) as usize);
+                let tail = format!("| {}/{} [{}<{}, {:.02}it/s]", it, tot, et, eta, rate);
 
                 let length = width.checked_sub(head.len() + tail.len()).unwrap_or(0);
-                let body = match self.step {
+                let body = match it {
                     step if step == tot => self.bar().0.repeat(length),
                     _ => {
                         let bar = length as f64 * pct;
@@ -361,7 +385,7 @@ mod tests {
 
     #[test]
     fn range() {
-        for i in tqdm(0..100) {
+        for i in tqdm(0..100).desc(Some("range")) {
             std::thread::sleep(Duration::from_millis(100));
             if i % 10 == 0 {
                 println!("break #{}", i);
@@ -371,7 +395,7 @@ mod tests {
 
     #[test]
     fn infinite() {
-        for i in tqdm(0..) {
+        for i in tqdm(0..).desc(Some("infinite")) {
             std::thread::sleep(Duration::from_millis(10));
             if i % 10 == 0 {
                 println!("break #{}", i);
@@ -381,7 +405,7 @@ mod tests {
 
     #[test]
     fn concurrent() {
-        for i in tqdm(tqdm(0..100).take(50)) {
+        for i in tqdm(tqdm(0..100).desc(Some("in")).take(50)).desc(Some("out")) {
             std::thread::sleep(Duration::from_millis(100));
             if i % 10 == 0 {
                 println!("break #{}", i);
@@ -391,18 +415,26 @@ mod tests {
 
     #[test]
     fn parallel() {
-        let threads = [
+        let threads: Vec<_> = [
             (200, Style::ASCII),
             (400, Style::Balloon),
             (100, Style::Block),
         ]
-        .map(|(its, style)| {
+        .into_iter()
+        .enumerate()
+        .map(|(idx, (its, style))| {
             std::thread::spawn(move || {
-                for _i in tqdm(0..its).style(style).width(Some(82)) {
+                for _i in tqdm(0..its)
+                    .style(style)
+                    .width(Some(82))
+                    .desc(Some(format!("par {}", idx).as_str()))
+                {
                     std::thread::sleep(Duration::from_millis(10));
                 }
             })
-        });
+        })
+        .collect();
+
         for handle in threads {
             handle.join().unwrap();
         }
