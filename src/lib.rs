@@ -8,12 +8,16 @@
 //! Most traits are bypassed with [auto-dereference](https://doc.rust-lang.org/std/ops/trait.Deref.html), so original methods can be called with no overhead.
 //!
 
+extern crate crossterm;
+
 use std::sync::*;
 use std::time::*;
 
 /* -------------------------------------------------------------------------- */
 /*                                   PUBLIC                                   */
 /* -------------------------------------------------------------------------- */
+
+/* -------------------------------- FUNCTION -------------------------------- */
 
 /// Wrap [Iterator] like it in Python. Returns [Tqdm](crate::Tqdm).
 ///
@@ -22,50 +26,53 @@ use std::time::*;
 /// - [width](crate::Tqdm::width): `None`
 ///
 pub fn tqdm<Item, Iter: Iterator<Item = Item>>(iter: Iter) -> Tqdm<Item, Iter> {
-    let data = Data {
-        start: SystemTime::now(),
+    let data = Arc::new(Mutex::new(Data {
+        begin: SystemTime::now(),
+        config: config::Config::default(),
 
-        desc: None,
-        width: None,
-        style: Style::Block,
-
-        step: 0,
+        nitem: 0,
         total: iter.size_hint().1,
-    };
+    }));
 
-    let sync = Arc::new(Mutex::new(data.clone()));
-    if let Ok(mut tqdms) = TQDM.lock() {
-        tqdms.push(sync.clone());
+    if let Ok(mut tqdm) = TQDM.lock() {
+        tqdm.push(data.clone());
     }
 
-    refresh_all();
-
+    refresh();
     Tqdm {
         iter,
-        prev: UNIX_EPOCH,
-
         data,
-        sync,
+
+        next: UNIX_EPOCH,
+        cache: 0,
+        freqlim: 24.,
     }
 }
 
-/// Public trait that allow `.tqdm()` method chaining. Equivalent to `tqdm::tqdm(iter)`.
+/// Force refresh all tqdms
 ///
-/// ## Examples
-/// ```
-/// use tqdm::Iter;
-/// (0..).take(1000).tqdm()
-/// ```
-///
-pub trait Iter<Item>: Iterator<Item = Item> {
-    fn tqdm(self) -> Tqdm<Item, Self>
-    where
-        Self: Sized,
-    {
-        tqdm(self)
+pub fn refresh() {
+    if let Ok(tqdms) = TQDM.lock() {
+        let tqdms: Vec<_> = tqdms.iter().filter_map(|data| data.lock().ok()).collect();
+        let (width, height) = crossterm::terminal::size()
+            .map(|(width, height)| (width as usize, height))
+            .unwrap_or((80, 24));
+
+        use crossterm::ExecutableCommand;
+        let mut stdout = std::io::stdout();
+        for (data, pos) in tqdms.iter().zip((0..height).rev()).rev() {
+            stdout.execute(crossterm::cursor::MoveTo(0, pos)).unwrap();
+            stdout
+                .write_fmt(format_args!("{:width$}", format!("{}", data)))
+                .unwrap();
+        }
+
+        use std::io::Write;
+        stdout.flush().unwrap();
     }
 }
-impl<Item, Iter: Iterator<Item = Item>> crate::Iter<Item> for Iter {}
+
+/* --------------------------------- STRUCT --------------------------------- */
 
 /// Iterator wrapper. Updates progress bar when `next` is called on it.
 ///
@@ -103,49 +110,18 @@ impl<Item, Iter: Iterator<Item = Item>> crate::Iter<Item> for Iter {}
 ///
 pub struct Tqdm<Item, Iter: Iterator<Item = Item>> {
     iter: Iter,
-    prev: SystemTime,
+    data: Arc<Mutex<Data>>,
 
-    data: Data,
-    sync: Arc<Mutex<Data>>,
-}
-
-/// Progress bar style enumeration.
-///
-/// - `ASCII`: Pure ASCII bar with `"0123456789#"`.
-/// - `Block`: Common bar with unicode characters `" ▏▎▍▌▋▊▉█"`.
-/// - `Balloon`: Simulate balloon explosion with `".oO@*"`. Inspired by [stackoverflow](https://stackoverflow.com/a/2685509/17570263).
-///
-/// Other styles are open for [contribution](https://github.com/mrlazy1708/tqdm/issues/1).
-///
-
-#[derive(Clone)]
-pub enum Style {
-    ASCII,
-    Block,
-    Balloon,
+    next: SystemTime,
+    cache: isize,
+    freqlim: f64,
 }
 
 impl<Item, Iter: Iterator<Item = Item>> Tqdm<Item, Iter> {
-    /// Configure progress bar total iterations.
-    ///
-    /// * `total` - iterater size-hint
-    ///     - `Some(usize)`: Fix-sized length.
-    ///     - `None`: Acquire original iterator's `size_hint`.
-    ///
-    /// ## Examples
-    /// ```
-    /// tqdm(0..100).total(Some(200))
-    /// ```
-    ///
-    pub fn total(mut self, total: Option<usize>) -> Self {
-        self.data.total = total;
-        self
-    }
-
     /// Configure progress bar's name.
     ///
     /// * `desc` - bar description
-    ///     - `Some(usize)`: Named progress bar.
+    ///     - `Some(ToString)`: Named progress bar.
     ///     - `None`: Anonymous.
     ///
     /// ## Examples
@@ -153,8 +129,11 @@ impl<Item, Iter: Iterator<Item = Item>> Tqdm<Item, Iter> {
     /// tqdm(0..100).desc(Some("Bar1"))
     /// ```
     ///
-    pub fn desc(mut self, desc: Option<&str>) -> Self {
-        self.data.desc = desc.map(str::to_string);
+    pub fn desc<S: ToString>(self, desc: Option<S>) -> Self {
+        if let Ok(mut data) = self.data.lock() {
+            data.config.desc = desc.map(|desc| desc.to_string());
+        }
+
         self
     }
 
@@ -169,22 +148,28 @@ impl<Item, Iter: Iterator<Item = Item>> Tqdm<Item, Iter> {
     /// tqdm(0..100).width(Some(100))
     /// ```
     ///
-    pub fn width(mut self, width: Option<usize>) -> Self {
-        self.data.width = width;
+    pub fn width(self, width: Option<usize>) -> Self {
+        if let Ok(mut data) = self.data.lock() {
+            data.config.width = width;
+        }
+
         self
     }
 
-    /// Configure progress bar style with its name.
+    /// Configure progress bar style.
     ///
-    /// * `style` - enum of the style
+    /// * `style` - `enum` of the style
     ///
     /// ## Examples
     /// ```
     /// tqdm(0..100).style(Style::Balloon)
     /// ```
     ///
-    pub fn style(mut self, style: Style) -> Self {
-        self.data.style = style;
+    pub fn style(self, style: config::Style) -> Self {
+        if let Ok(mut data) = self.data.lock() {
+            data.config.style = style;
+        }
+
         self
     }
 }
@@ -199,41 +184,46 @@ impl<Item, Iter: Iterator<Item = Item>> Tqdm<Item, Iter> {
     /// tqdm(0..100).step(100).step(-1)
     /// ```
     ///
-    pub fn step(&mut self, delta: isize) {
-        self.data.step = (self.data.step as isize + delta) as usize;
+    pub fn update(&mut self, nitem: isize) {
+        self.cache += nitem;
 
-        if (self.prev + Duration::from_millis(16)).elapsed().is_ok() {
-            self.prev = SystemTime::now();
+        if self.next.elapsed().is_ok() {
+            if let Ok(mut data) = self.data.lock() {
+                let nitem = (data.nitem as isize) + self.cache;
+                data.nitem = nitem.try_into().unwrap_or(0);
 
-            if let Ok(mut data) = self.sync.lock() {
-                *data = self.data.clone();
+                self.cache = 0;
             }
 
-            refresh_all();
+            self.next = SystemTime::now() + Duration::from_secs_f64(1. / self.freqlim);
+            refresh();
         }
     }
 }
 
 impl<Item, Iter: Iterator<Item = Item>> Iterator for Tqdm<Item, Iter> {
     type Item = Item;
+
     fn next(&mut self) -> Option<Self::Item> {
-        if let Some(item) = self.iter.next() {
-            self.step(1);
-            Some(item)
-        } else {
-            None
-        }
+        let next = self.iter.next();
+        self.update(next.is_some() as isize);
+
+        next
     }
 }
 
 impl<Item, Iter: Iterator<Item = Item>> std::fmt::Display for Tqdm<Item, Iter> {
-    fn fmt(&self, fmt: &mut std::fmt::Formatter<'_>) -> Result<(), std::fmt::Error> {
-        self.data.fmt(fmt)
+    fn fmt(&self, fmt: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self.data.lock() {
+            Ok(data) => data.fmt(fmt),
+            Err(_) => Err(std::fmt::Error),
+        }
     }
 }
 
 impl<Item, Iter: Iterator<Item = Item>> std::ops::Deref for Tqdm<Item, Iter> {
     type Target = Iter;
+
     fn deref(&self) -> &Self::Target {
         &self.iter
     }
@@ -248,17 +238,98 @@ impl<Item, Iter: Iterator<Item = Item>> std::ops::DerefMut for Tqdm<Item, Iter> 
 impl<Item, Iter: Iterator<Item = Item>> Drop for Tqdm<Item, Iter> {
     fn drop(&mut self) {
         if let Ok(mut tqdms) = TQDM.lock() {
-            tqdms.retain(|this| !Arc::ptr_eq(this, &self.sync));
+            tqdms.retain(|this| !Arc::ptr_eq(this, &self.data));
+            let (width, height) = crossterm::terminal::size()
+                .map(|(width, height)| (width as usize, height))
+                .unwrap_or((80, 24));
 
-            let (ncol, nrow) = display_size();
-            let top = nrow.checked_sub(tqdms.len()).unwrap_or(0);
+            use crossterm::ExecutableCommand;
+            let mut stdout = std::io::stdout();
 
-            use termion::cursor;
-            print!("{}", cursor::Goto(1, top as u16));
-            print!("{:ncol$}", format!("{}", self.data));
+            let pos = (height - 1).checked_sub(tqdms.len() as u16).unwrap_or(0);
+            stdout.execute(crossterm::cursor::MoveTo(0, pos)).unwrap();
+            stdout
+                .write_fmt(format_args!(
+                    "{:width$}",
+                    format!("{}", self.data.lock().unwrap())
+                ))
+                .unwrap();
+
+            use std::io::Write;
+            stdout.flush().unwrap();
+
+            // let (ncol, nrow) = display_size();
+            // let top = nrow.checked_sub(tqdms.len()).unwrap_or(0);
+
+            // use termion::cursor;
+            // print!("{}", cursor::Goto(1, top as u16));
+            // print!("{:ncol$}", format!("{}", self.data));
         }
 
-        refresh_all();
+        refresh();
+    }
+}
+
+/* ---------------------------------- TRAIT --------------------------------- */
+
+/// Public trait that allow `.tqdm()` method chaining. Equivalent to `tqdm::tqdm(iter)`.
+///
+/// ## Examples
+/// ```
+/// use tqdm::Iter;
+/// (0..).take(1000).tqdm()
+/// ```
+///
+pub trait Iter<Item>: Iterator<Item = Item> {
+    fn tqdm(self) -> Tqdm<Item, Self>
+    where
+        Self: Sized,
+    {
+        tqdm(self)
+    }
+}
+
+impl<Item, Iter: Iterator<Item = Item>> crate::Iter<Item> for Iter {}
+
+/* ----------------------------------- MOD ---------------------------------- */
+
+pub mod config {
+
+    #[derive(Default)]
+    pub struct Config {
+        pub desc: Option<String>,
+        pub width: Option<usize>,
+        pub style: Style,
+    }
+
+    /// Progress bar style enumeration.
+    ///
+    /// - `ASCII`: Pure ASCII bar with `"0123456789#"`.
+    /// - `Block`: Common bar with unicode characters `" ▏▎▍▌▋▊▉█"`.
+    /// - `Balloon`: Simulate balloon explosion with `".oO@*"`. Inspired by [stackoverflow](https://stackoverflow.com/a/2685509/17570263).
+    ///
+    /// Other styles are open for [contribution](https://github.com/mrlazy1708/tqdm/issues/1).
+    ///
+    pub enum Style {
+        ASCII,
+        Block,
+        Balloon,
+    }
+
+    impl Default for Style {
+        fn default() -> Style {
+            Style::Block
+        }
+    }
+
+    impl ToString for Style {
+        fn to_string(&self) -> String {
+            String::from(match self {
+                Style::ASCII => "0123456789#",
+                Style::Block => " ▏▎▍▌▋▊▉█",
+                Style::Balloon => ".oO@*",
+            })
+        }
     }
 }
 
@@ -266,110 +337,78 @@ impl<Item, Iter: Iterator<Item = Item>> Drop for Tqdm<Item, Iter> {
 /*                                   PRIVATE                                  */
 /* -------------------------------------------------------------------------- */
 
-#[macro_use]
-extern crate lazy_static;
-lazy_static! {
-    static ref TQDM: Mutex<Vec<Arc<Mutex<Data>>>> = Mutex::new(Vec::new());
-}
+/* --------------------------------- STATIC --------------------------------- */
 
-fn display_size() -> (usize, usize) {
-    use termion::terminal_size;
-    if let Ok((ncol, nrow)) = terminal_size() {
-        (ncol as usize, nrow as usize)
-    } else {
-        (80, 1)
-    }
-}
+static TQDM: Mutex<Vec<Arc<Mutex<Data>>>> = Mutex::new(Vec::new());
 
-fn refresh_all() {
-    if let Ok(tqdms) = TQDM.lock() {
-        let tqdms: Vec<_> = tqdms.iter().filter_map(|data| data.lock().ok()).collect();
+/* --------------------------------- STRUCT --------------------------------- */
 
-        let (ncol, nrow) = display_size();
-        let top = nrow.checked_sub(tqdms.len()).unwrap_or(0);
+pub struct Data {
+    begin: std::time::SystemTime,
+    config: config::Config,
 
-        use termion::cursor;
-        print!("{}", cursor::Goto(1, top as u16 + 1));
-
-        for data in tqdms.iter().take(nrow as usize) {
-            print!("{:ncol$}", format!("{}", data));
-        }
-
-        use std::io::Write;
-        std::io::stdout().flush().unwrap();
-    }
-}
-
-#[derive(Clone)]
-struct Data {
-    start: SystemTime,
-
-    desc: Option<String>,
-    width: Option<usize>,
-    style: Style,
-
+    nitem: usize,
     total: Option<usize>,
-    step: usize,
-}
-
-impl Data {
-    fn bar(&self) -> (&str, &[char]) {
-        match self.style {
-            Style::ASCII => ("#", &['0', '1', '2', '3', '4', '5', '6', '7', '8', '9']),
-            Style::Block => ("█", &[' ', '▏', '▎', '▍', '▌', '▋', '▊', '▉']),
-            Style::Balloon => ("*", &['.', 'o', 'O', '@']),
-        }
-    }
 }
 
 impl std::fmt::Display for Data {
-    fn fmt(&self, fmt: &mut std::fmt::Formatter<'_>) -> Result<(), std::fmt::Error> {
-        let elapsed_time = SystemTime::now().duration_since(self.start);
-        let elapsed = elapsed_time.as_ref().map_or(0, Duration::as_millis) as usize;
-
-        let width = self
-            .width
-            .or_else(|| fmt.width())
-            .unwrap_or_else(|| display_size().0);
-
-        let desc = match &self.desc {
-            Some(desc) => format!("{}: ", desc),
-            None => "".to_string(),
+    fn fmt(&self, fmt: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let elapsed = {
+            let time = self.begin.elapsed();
+            time.as_ref().map_or(0., std::time::Duration::as_secs_f64)
         };
 
-        let format_time = |seconds| match seconds / 3600 {
-            0 => format!("{:02}:{:02}", seconds / 60 % 60, seconds % 60),
-            x => format!("{:02}:{:02}:{:02}", x, seconds / 60 % 60, seconds % 60),
-        };
+        let config::Config { desc, width, style } = &self.config;
+        let desc = desc
+            .as_ref()
+            .map(|id| format!("{}: ", id))
+            .unwrap_or(String::new());
+        let width = width.unwrap_or_else(|| {
+            crossterm::terminal::size()
+                .map(|(width, _)| width as usize)
+                .unwrap_or(80)
+        });
 
-        let it = self.step;
-        let et = format_time(elapsed / 1000);
-        let rate = it as f64 / elapsed as f64 * 1000.0;
+        /// Time format omitting leading 0
+        fn ftime(seconds: usize) -> String {
+            let m = seconds / 60 % 60;
+            let s = seconds % 60;
+            match seconds / 3600 {
+                0 => format!("{:02}:{:02}", m, s),
+                h => format!("{:02}:{:02}:{:02}", h, m, s),
+            }
+        }
+
+        let it = self.nitem;
+        let its = it as f64 / elapsed;
+        let time = ftime(elapsed as usize);
         match self.total {
-            None => fmt.write_fmt(format_args!("{}{}it [{}, {:.02}it/s]", desc, it, et, rate)),
-            Some(tot) => {
-                let pct = (it as f64 / tot as f64).clamp(0.0, 1.0);
-                let rem = tot.checked_sub(it).unwrap_or(0);
+            None => fmt.write_fmt(format_args!("{}{}it [{}, {:.02}it/s]", desc, it, time, its)),
+
+            Some(total) => {
+                let pct = (it as f64 / total as f64).clamp(0.0, 1.0);
                 let eta = match it {
-                    0 => "?".to_string(),
-                    x => format_time(elapsed * rem / x / 1000),
+                    0 => String::from("?"),
+                    _ => ftime((elapsed / pct * (1. - pct)) as usize),
                 };
 
-                let head = format!("{}{:>3}%|", desc, (100.0 * pct) as usize);
-                let tail = format!("| {}/{} [{}<{}, {:.02}it/s]", it, tot, et, eta, rate);
+                let bra_ = format!("{}{:>3}%|", desc, (100.0 * pct) as usize);
+                let _ket = format!("| {}/{} [{}<{}, {:.02}it/s]", it, total, time, eta, its);
+                let tqdm = {
+                    let limit = width.checked_sub(bra_.len() + _ket.len()).unwrap_or(0);
+                    let pattern: Vec<char> = style.to_string().chars().collect();
 
-                let length = width.checked_sub(head.len() + tail.len()).unwrap_or(0);
-                let body = match it {
-                    step if step == tot => self.bar().0.repeat(length),
-                    _ => {
-                        let bar = length as f64 * pct;
-                        let full = self.bar().0.repeat(bar.floor() as usize);
-                        let edge = self.bar().1[(self.bar().1.len() as f64 * bar.fract()) as usize];
-                        format!("{}{}", full, edge)
+                    let m = pattern.len();
+                    let n = ((limit as f64 * pct) * m as f64) as usize;
+
+                    let bar = pattern.last().unwrap().to_string().repeat(n / m);
+                    match n / m {
+                        x if x == limit => bar,
+                        _ => format!("{:<limit$}", format!("{}{}", bar, pattern[n % m])),
                     }
                 };
 
-                fmt.write_fmt(format_args!("{}{:length$}{}", head, body, tail))
+                fmt.write_fmt(format_args!("{}{}{}", bra_, tqdm, _ket))
             }
         }
     }
@@ -385,8 +424,8 @@ mod tests {
 
     #[test]
     fn range() {
-        for i in tqdm(0..100).desc(Some("range")) {
-            std::thread::sleep(Duration::from_millis(100));
+        for i in tqdm(0..100).desc(Some("range")).width(Some(82)) {
+            std::thread::sleep(Duration::from_secs_f64(0.1));
             if i % 10 == 0 {
                 println!("break #{}", i);
             }
@@ -396,7 +435,7 @@ mod tests {
     #[test]
     fn infinite() {
         for i in tqdm(0..).desc(Some("infinite")) {
-            std::thread::sleep(Duration::from_millis(10));
+            std::thread::sleep(Duration::from_secs_f64(0.1));
             if i % 10 == 0 {
                 println!("break #{}", i);
             }
@@ -416,9 +455,9 @@ mod tests {
     #[test]
     fn parallel() {
         let threads: Vec<_> = [
-            (200, Style::ASCII),
-            (400, Style::Balloon),
-            (100, Style::Block),
+            (200, config::Style::ASCII),
+            (400, config::Style::Balloon),
+            (100, config::Style::Block),
         ]
         .into_iter()
         .enumerate()
