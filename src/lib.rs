@@ -59,16 +59,16 @@ pub fn refresh() {
             .unwrap_or((80, 24));
 
         use crossterm::ExecutableCommand;
-        let mut stdout = std::io::stdout();
+        let mut stderr = std::io::stderr();
         for (data, pos) in tqdms.iter().zip((0..height).rev()).rev() {
-            stdout.execute(crossterm::cursor::MoveTo(0, pos)).unwrap();
-            stdout
+            stderr.execute(crossterm::cursor::MoveTo(0, pos)).unwrap();
+            stderr
                 .write_fmt(format_args!("{:width$}", format!("{}", data)))
                 .unwrap();
         }
 
         use std::io::Write;
-        stdout.flush().unwrap();
+        stderr.flush().unwrap();
     }
 }
 
@@ -244,11 +244,11 @@ impl<Item, Iter: Iterator<Item = Item>> Drop for Tqdm<Item, Iter> {
                 .unwrap_or((80, 24));
 
             use crossterm::ExecutableCommand;
-            let mut stdout = std::io::stdout();
+            let mut stderr = std::io::stderr();
 
             let pos = (height - 1).checked_sub(tqdms.len() as u16).unwrap_or(0);
-            stdout.execute(crossterm::cursor::MoveTo(0, pos)).unwrap();
-            stdout
+            stderr.execute(crossterm::cursor::MoveTo(0, pos)).unwrap();
+            stderr
                 .write_fmt(format_args!(
                     "{:width$}",
                     format!("{}", self.data.lock().unwrap())
@@ -256,7 +256,7 @@ impl<Item, Iter: Iterator<Item = Item>> Drop for Tqdm<Item, Iter> {
                 .unwrap();
 
             use std::io::Write;
-            stdout.flush().unwrap();
+            stderr.flush().unwrap();
 
             // let (ncol, nrow) = display_size();
             // let top = nrow.checked_sub(tqdms.len()).unwrap_or(0);
