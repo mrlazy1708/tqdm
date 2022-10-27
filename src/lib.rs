@@ -8,10 +8,12 @@
 //! Most traits are bypassed with [auto-dereference](https://doc.rust-lang.org/std/ops/trait.Deref.html), so original methods can be called with no overhead.
 //!
 
-extern crate crossterm;
-
 use std::sync::*;
 use std::time::*;
+
+use std::io::Write;
+
+extern crate crossterm;
 
 /* -------------------------------------------------------------------------- */
 /*                                   PUBLIC                                   */
@@ -19,75 +21,73 @@ use std::time::*;
 
 /* -------------------------------- FUNCTION -------------------------------- */
 
-/// Wrap [Iterator] like it in Python. Returns [Tqdm](crate::Tqdm).
 ///
-/// ## Default
-/// - [style](crate::Tqdm::style): `Style::Block`
-/// - [width](crate::Tqdm::width): `None`
+/// Wrap [Iterator] like it in Python
 ///
-pub fn tqdm<Item, Iter: Iterator<Item = Item>>(iter: Iter) -> Tqdm<Item, Iter> {
-    let data = Arc::new(Mutex::new(Data {
+pub fn tqdm<Item, Iter: Iterator<Item = Item>>(iterable: Iter) -> Tqdm<Item, Iter> {
+    let info = Arc::new(Mutex::new(Info {
         begin: SystemTime::now(),
         config: config::Config::default(),
 
         nitem: 0,
-        total: iter.size_hint().1,
+        total: iterable.size_hint().1,
     }));
 
     if let Ok(mut tqdm) = TQDM.lock() {
-        tqdm.push(data.clone());
+        tqdm.push(info.clone());
     }
 
-    refresh();
     Tqdm {
-        iter,
-        data,
+        iterable,
 
+        info: Some(info),
         next: UNIX_EPOCH,
-        cache: 0,
+        cache: 0usize,
         freqlim: 24.,
     }
 }
 
-/// Force refresh all tqdms
 ///
-pub fn refresh() {
-    if let Ok(tqdms) = TQDM.lock() {
-        let tqdms: Vec<_> = tqdms.iter().filter_map(|data| data.lock().ok()).collect();
-        let (width, height) = crossterm::terminal::size()
-            .map(|(width, height)| (width as usize, height))
-            .unwrap_or((80, 24));
+/// Manually refresh all progress bars
+///
+pub fn refresh() -> std::io::Result<()> {
+    let mut stderr = std::io::stderr();
 
-        use crossterm::ExecutableCommand;
-        let mut stderr = std::io::stderr();
-        for (data, pos) in tqdms.iter().zip((0..height).rev()).rev() {
-            stderr.execute(crossterm::cursor::MoveTo(0, pos)).unwrap();
-            stderr
-                .write_fmt(format_args!("{:width$}", format!("{}", data)))
-                .unwrap();
+    use crossterm::ExecutableCommand;
+    stderr.execute(crossterm::cursor::MoveToColumn(0))?;
+    stderr.execute(crossterm::cursor::SavePosition)?;
+
+    if let Ok(tqdm) = TQDM.lock() {
+        let lim = crossterm::terminal::size().map_or(80, |(width, _)| width as usize);
+        let info: Vec<_> = tqdm.iter().filter_map(|info| info.lock().ok()).collect();
+        for info in &info {
+            stderr.write_fmt(format_args!("{:<1$}", format!("{}", info), lim))?;
         }
 
-        use std::io::Write;
-        stderr.flush().unwrap();
+        stderr.execute(crossterm::cursor::RestorePosition)?;
     }
+
+    stderr.flush()
 }
 
 /* --------------------------------- STRUCT --------------------------------- */
 
-/// Iterator wrapper. Updates progress bar when `next` is called on it.
+///
+/// Iterator wrapper that updates progress bar on `next`
+///
 ///
 /// ## Examples
 ///
 /// - Basic Usage
 /// ```
-/// for _i in tqdm(0..100) {
+/// for _ in tqdm(0..100) {
 ///     thread::sleep(Duration::from_millis(10));
 /// }
 /// ```
 ///
 /// - Composition
 /// ```
-/// for _i in tqdm(tqdm(0..100).take(50)) {
+/// for _ in tqdm(tqdm(0..100).take(50)) {
 ///     thread::sleep(Duration::from_millis(10));
 /// }
 /// ```
@@ -96,7 +96,7 @@ pub fn refresh() {
 /// ```
 /// let threads: Vec<_> = [200, 400, 100].iter().map(|its| {
 ///         std::thread::spawn(move || {
-///             for _i in tqdm(0..*its) {
+///             for _ in tqdm(0..*its) {
 ///                 thread::sleep(Duration::from_millis(10));
 ///             }
 ///         })
@@ -109,20 +109,33 @@ pub fn refresh() {
 /// ```
 ///
 pub struct Tqdm<Item, Iter: Iterator<Item = Item>> {
-    iter: Iter,
-    data: Arc<Mutex<Data>>,
+    /// Iterable to decorate with a progress bar
+    pub iterable: Iter,
 
+    /// Reference to its information mutex
+    info: Option<Arc<Mutex<Info>>>,
+
+    /// Timestamp after which need refresh
     next: SystemTime,
-    cache: isize,
+
+    /// Steps to be synchronized
+    cache: usize,
+
+    /// Maximum update frequency
     freqlim: f64,
 }
 
+///
+/// Configure progress bar
+///
 impl<Item, Iter: Iterator<Item = Item>> Tqdm<Item, Iter> {
-    /// Configure progress bar's name.
+    ///
+    /// Configure progress bar's name
     ///
     /// * `desc` - bar description
-    ///     - `Some(ToString)`: Named progress bar.
-    ///     - `None`: Anonymous.
+    ///     - `Some(S)`: Named progress bar
+    ///     - `None`: Anonymous
+    ///
     ///
     /// ## Examples
     /// ```
@@ -130,18 +143,22 @@ impl<Item, Iter: Iterator<Item = Item>> Tqdm<Item, Iter> {
     /// ```
     ///
     pub fn desc<S: ToString>(self, desc: Option<S>) -> Self {
-        if let Ok(mut data) = self.data.lock() {
-            data.config.desc = desc.map(|desc| desc.to_string());
+        if let Some(info) = &self.info {
+            if let Ok(mut info) = info.lock() {
+                info.config.desc = desc.map(|desc| desc.to_string());
+            }
         }
 
         self
     }
 
-    /// Configure progress bar width.
+    ///
+    /// Configure progress bar's width
     ///
     /// * `width` - width limitation
-    ///     - `Some(usize)`: Fixed width regardless of terminal size.
-    ///     - `None`: Expand to formatter limit or full terminal width.
+    ///     - `Some(usize)`: Fixed width regardless of terminal size
+    ///     - `None`: Expand to formatter limit or full terminal width
+    ///
     ///
     /// ## Examples
     /// ```
@@ -149,16 +166,20 @@ impl<Item, Iter: Iterator<Item = Item>> Tqdm<Item, Iter> {
     /// ```
     ///
     pub fn width(self, width: Option<usize>) -> Self {
-        if let Ok(mut data) = self.data.lock() {
-            data.config.width = width;
+        if let Some(info) = &self.info {
+            if let Ok(mut info) = info.lock() {
+                info.config.width = width;
+            }
         }
 
         self
     }
 
-    /// Configure progress bar style.
+    ///
+    /// Configure progress bar's style
     ///
     /// * `style` - `enum` of the style
+    ///
     ///
     /// ## Examples
     /// ```
@@ -166,38 +187,48 @@ impl<Item, Iter: Iterator<Item = Item>> Tqdm<Item, Iter> {
     /// ```
     ///
     pub fn style(self, style: config::Style) -> Self {
-        if let Ok(mut data) = self.data.lock() {
-            data.config.style = style;
+        if let Some(info) = &self.info {
+            if let Ok(mut info) = info.lock() {
+                info.config.style = style;
+            }
         }
 
         self
     }
 }
 
+///
+/// Progress bar operations
+///
 impl<Item, Iter: Iterator<Item = Item>> Tqdm<Item, Iter> {
-    /// Update progress bar steps.
-    ///
-    /// * `delta` - number of newly processed items
-    ///
-    /// ## Examples
-    /// ```
-    /// tqdm(0..100).step(100).step(-1)
-    /// ```
-    ///
-    pub fn update(&mut self, nitem: isize) {
-        self.cache += nitem;
-
-        if self.next.elapsed().is_ok() {
-            if let Ok(mut data) = self.data.lock() {
-                let nitem = (data.nitem as isize) + self.cache;
-                data.nitem = nitem.try_into().unwrap_or(0);
-
+    fn sync(&mut self) -> std::io::Result<()> {
+        if let Some(info) = &self.info {
+            if let Ok(mut info) = info.lock() {
+                info.nitem += self.cache;
                 self.cache = 0;
             }
-
-            self.next = SystemTime::now() + Duration::from_secs_f64(1. / self.freqlim);
-            refresh();
         }
+
+        refresh()
+    }
+
+    ///
+    /// Manually close the bar and unregister it
+    ///
+    pub fn close(&mut self) -> std::io::Result<()> {
+        self.sync()?;
+
+        if let Ok(mut tqdm) = TQDM.lock() {
+            if let Some(info) = self.info.take() {
+                if let Ok(info) = info.lock() {
+                    eprintln!("{}", info);
+                }
+
+                tqdm.retain(|this| !Arc::ptr_eq(this, &info));
+            }
+        }
+
+        refresh()
     }
 }
 
@@ -205,18 +236,19 @@ impl<Item, Iter: Iterator<Item = Item>> Iterator for Tqdm<Item, Iter> {
     type Item = Item;
 
     fn next(&mut self) -> Option<Self::Item> {
-        let next = self.iter.next();
-        self.update(next.is_some() as isize);
+        if self.next.elapsed().is_ok() {
+            drop(self.sync());
 
-        next
-    }
-}
+            self.next = SystemTime::now();
+            self.next += Duration::from_secs_f64(1. / self.freqlim);
+        }
 
-impl<Item, Iter: Iterator<Item = Item>> std::fmt::Display for Tqdm<Item, Iter> {
-    fn fmt(&self, fmt: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self.data.lock() {
-            Ok(data) => data.fmt(fmt),
-            Err(_) => Err(std::fmt::Error),
+        if let Some(next) = self.iterable.next() {
+            self.cache += 1;
+            Some(next)
+        } else {
+            drop(self.close());
+            None
         }
     }
 }
@@ -225,54 +257,26 @@ impl<Item, Iter: Iterator<Item = Item>> std::ops::Deref for Tqdm<Item, Iter> {
     type Target = Iter;
 
     fn deref(&self) -> &Self::Target {
-        &self.iter
+        &self.iterable
     }
 }
 
 impl<Item, Iter: Iterator<Item = Item>> std::ops::DerefMut for Tqdm<Item, Iter> {
     fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.iter
+        &mut self.iterable
     }
 }
 
 impl<Item, Iter: Iterator<Item = Item>> Drop for Tqdm<Item, Iter> {
     fn drop(&mut self) {
-        if let Ok(mut tqdms) = TQDM.lock() {
-            tqdms.retain(|this| !Arc::ptr_eq(this, &self.data));
-            let (width, height) = crossterm::terminal::size()
-                .map(|(width, height)| (width as usize, height))
-                .unwrap_or((80, 24));
-
-            use crossterm::ExecutableCommand;
-            let mut stderr = std::io::stderr();
-
-            let pos = (height - 1).checked_sub(tqdms.len() as u16).unwrap_or(0);
-            stderr.execute(crossterm::cursor::MoveTo(0, pos)).unwrap();
-            stderr
-                .write_fmt(format_args!(
-                    "{:width$}",
-                    format!("{}", self.data.lock().unwrap())
-                ))
-                .unwrap();
-
-            use std::io::Write;
-            stderr.flush().unwrap();
-
-            // let (ncol, nrow) = display_size();
-            // let top = nrow.checked_sub(tqdms.len()).unwrap_or(0);
-
-            // use termion::cursor;
-            // print!("{}", cursor::Goto(1, top as u16));
-            // print!("{:ncol$}", format!("{}", self.data));
-        }
-
-        refresh();
+        drop(self.close());
     }
 }
 
 /* ---------------------------------- TRAIT --------------------------------- */
 
-/// Public trait that allow `.tqdm()` method chaining. Equivalent to `tqdm::tqdm(iter)`.
+/// Public trait that allow `.tqdm()` method chaining, equivalent to `tqdm::tqdm(iter)`
+///
 ///
 /// ## Examples
 /// ```
@@ -302,11 +306,12 @@ pub mod config {
         pub style: Style,
     }
 
-    /// Progress bar style enumeration.
     ///
-    /// - `ASCII`: Pure ASCII bar with `"0123456789#"`.
-    /// - `Block`: Common bar with unicode characters `" ▏▎▍▌▋▊▉█"`.
-    /// - `Balloon`: Simulate balloon explosion with `".oO@*"`. Inspired by [stackoverflow](https://stackoverflow.com/a/2685509/17570263).
+    /// Progress bar style enumeration
+    ///
+    /// - `ASCII`: Pure ASCII bar with `"0123456789#"`
+    /// - `Block`: Common bar with unicode characters `" ▏▎▍▌▋▊▉█"`
+    /// - `Balloon`: Simulate balloon explosion with `".oO@*"`. Inspired by [stackoverflow](https://stackoverflow.com/a/2685509/17570263)
     ///
     /// Other styles are open for [contribution](https://github.com/mrlazy1708/tqdm/issues/1).
     ///
@@ -339,11 +344,18 @@ pub mod config {
 
 /* --------------------------------- STATIC --------------------------------- */
 
-static TQDM: Mutex<Vec<Arc<Mutex<Data>>>> = Mutex::new(Vec::new());
+static TQDM: Mutex<Vec<Arc<Mutex<Info>>>> = Mutex::new(Vec::new());
+
+/* -------------------------------- FUNCTION -------------------------------- */
+
+fn terminal<W: From<u16>, H: From<u16>>() -> (W, H) {
+    let (width, height) = crossterm::terminal::size().unwrap_or((80, 64));
+    (W::from(width), H::from(height))
+}
 
 /* --------------------------------- STRUCT --------------------------------- */
 
-pub struct Data {
+struct Info {
     begin: std::time::SystemTime,
     config: config::Config,
 
@@ -351,7 +363,7 @@ pub struct Data {
     total: Option<usize>,
 }
 
-impl std::fmt::Display for Data {
+impl std::fmt::Display for Info {
     fn fmt(&self, fmt: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let elapsed = {
             let time = self.begin.elapsed();
@@ -359,15 +371,8 @@ impl std::fmt::Display for Data {
         };
 
         let config::Config { desc, width, style } = &self.config;
-        let desc = desc
-            .as_ref()
-            .map(|id| format!("{}: ", id))
-            .unwrap_or(String::new());
-        let width = width.unwrap_or_else(|| {
-            crossterm::terminal::size()
-                .map(|(width, _)| width as usize)
-                .unwrap_or(80)
-        });
+        let desc = desc.clone().map_or(String::new(), |desc| desc + ": ");
+        let width = width.unwrap_or_else(|| terminal::<usize, u16>().0);
 
         /// Time format omitting leading 0
         fn ftime(seconds: usize) -> String {
@@ -423,6 +428,16 @@ mod tests {
     use super::*;
 
     #[test]
+    fn example() {
+        tqdm(0..100).for_each(|_| std::thread::sleep(Duration::from_secs_f64(0.01)));
+    }
+
+    #[test]
+    fn very_slow() {
+        tqdm(0..100).for_each(|_| std::thread::sleep(Duration::from_secs_f64(10.0)));
+    }
+
+    #[test]
     fn range() {
         for i in tqdm(0..100).desc(Some("range")).width(Some(82)) {
             std::thread::sleep(Duration::from_secs_f64(0.1));
@@ -436,16 +451,6 @@ mod tests {
     fn infinite() {
         for i in tqdm(0..).desc(Some("infinite")) {
             std::thread::sleep(Duration::from_secs_f64(0.1));
-            if i % 10 == 0 {
-                println!("break #{}", i);
-            }
-        }
-    }
-
-    #[test]
-    fn concurrent() {
-        for i in tqdm(tqdm(0..100).desc(Some("in")).take(50)).desc(Some("out")) {
-            std::thread::sleep(Duration::from_millis(100));
             if i % 10 == 0 {
                 println!("break #{}", i);
             }
