@@ -39,7 +39,7 @@ Expose trait to allow method chaining
 
 ```rust
 use tqdm::Iter;
-for i in (0..).take(10000).tqdm().style(tqdm::config::Style::Balloon) {
+for i in (0..).take(10000).tqdm().style(tqdm::Style::Balloon) {
   ...
 ```
 

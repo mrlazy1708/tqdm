@@ -8,12 +8,14 @@
 //! Most traits are bypassed with [auto-dereference](https://doc.rust-lang.org/std/ops/trait.Deref.html), so original methods can be called with no overhead.
 //!
 
+extern crate crossterm;
+
 use std::sync::*;
 use std::time::*;
 
 use std::io::Write;
 
-extern crate crossterm;
+pub use config::Style;
 
 /* -------------------------------------------------------------------------- */
 /*                                   PUBLIC                                   */
@@ -27,7 +29,7 @@ extern crate crossterm;
 pub fn tqdm<Item, Iter: Iterator<Item = Item>>(iterable: Iter) -> Tqdm<Item, Iter> {
     let info = Arc::new(Mutex::new(Info {
         begin: SystemTime::now(),
-        config: config::Config::default(),
+        config: Config::default(),
 
         nitem: 0,
         total: iterable.size_hint().1,
@@ -183,10 +185,10 @@ impl<Item, Iter: Iterator<Item = Item>> Tqdm<Item, Iter> {
     ///
     /// ## Examples
     /// ```
-    /// tqdm(0..100).style(tqdm::config::Style::Balloon)
+    /// tqdm(0..100).style(tqdm::Style::Balloon)
     /// ```
     ///
-    pub fn style(self, style: config::Style) -> Self {
+    pub fn style(self, style: Style) -> Self {
         if let Some(info) = &self.info {
             if let Ok(mut info) = info.lock() {
                 info.config.style = style;
@@ -295,9 +297,23 @@ pub trait Iter<Item>: Iterator<Item = Item> {
 
 impl<Item, Iter: Iterator<Item = Item>> crate::Iter<Item> for Iter {}
 
-/* ----------------------------------- MOD ---------------------------------- */
+/* -------------------------------------------------------------------------- */
+/*                                   PRIVATE                                  */
+/* -------------------------------------------------------------------------- */
 
-pub mod config {
+/* --------------------------------- STATIC --------------------------------- */
+
+static TQDM: Mutex<Vec<Arc<Mutex<Info>>>> = Mutex::new(Vec::new());
+
+fn terminal<W: From<u16>, H: From<u16>>() -> (W, H) {
+    let (width, height) = crossterm::terminal::size().unwrap_or((80, 64));
+    (W::from(width), H::from(height))
+}
+
+/* --------------------------------- CONFIG --------------------------------- */
+
+use config::*;
+mod config {
 
     #[derive(Default)]
     pub struct Config {
@@ -338,26 +354,11 @@ pub mod config {
     }
 }
 
-/* -------------------------------------------------------------------------- */
-/*                                   PRIVATE                                  */
-/* -------------------------------------------------------------------------- */
-
-/* --------------------------------- STATIC --------------------------------- */
-
-static TQDM: Mutex<Vec<Arc<Mutex<Info>>>> = Mutex::new(Vec::new());
-
-/* -------------------------------- FUNCTION -------------------------------- */
-
-fn terminal<W: From<u16>, H: From<u16>>() -> (W, H) {
-    let (width, height) = crossterm::terminal::size().unwrap_or((80, 64));
-    (W::from(width), H::from(height))
-}
-
-/* --------------------------------- STRUCT --------------------------------- */
+/* ---------------------------------- INFO ---------------------------------- */
 
 struct Info {
     begin: std::time::SystemTime,
-    config: config::Config,
+    config: Config,
 
     nitem: usize,
     total: Option<usize>,
@@ -370,7 +371,7 @@ impl std::fmt::Display for Info {
             time.as_ref().map_or(0., std::time::Duration::as_secs_f64)
         };
 
-        let config::Config { desc, width, style } = &self.config;
+        let Config { desc, width, style } = &self.config;
         let desc = desc.clone().map_or(String::new(), |desc| desc + ": ");
         let width = width.unwrap_or_else(|| terminal::<usize, u16>().0);
 
@@ -460,9 +461,9 @@ mod tests {
     #[test]
     fn parallel() {
         let threads: Vec<_> = [
-            (200, config::Style::ASCII),
-            (400, config::Style::Balloon),
-            (100, config::Style::Block),
+            (200, Style::ASCII),
+            (400, Style::Balloon),
+            (100, Style::Block),
         ]
         .into_iter()
         .enumerate()
