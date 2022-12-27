@@ -183,7 +183,7 @@ impl<Item, Iter: Iterator<Item = Item>> Tqdm<Item, Iter> {
     ///
     /// ## Examples
     /// ```
-    /// tqdm(0..100).style(Style::Balloon)
+    /// tqdm(0..100).style(tqdm::config::Style::Balloon)
     /// ```
     ///
     pub fn style(self, style: config::Style) -> Self {
