@@ -303,7 +303,11 @@ impl<Item, Iter: Iterator<Item = Item>> crate::Iter<Item> for Iter {}
 
 /* --------------------------------- STATIC --------------------------------- */
 
-static TQDM: Mutex<Vec<Arc<Mutex<Info>>>> = Mutex::new(Vec::new());
+#[macro_use]
+extern crate lazy_static;
+lazy_static! {
+    static ref TQDM: Mutex<Vec<Arc<Mutex<Info>>>> = Mutex::new(Vec::new());
+}
 
 fn terminal<W: From<u16>, H: From<u16>>() -> (W, H) {
     let (width, height) = crossterm::terminal::size().unwrap_or((80, 64));
