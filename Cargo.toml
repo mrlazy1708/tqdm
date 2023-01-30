@@ -1,9 +1,10 @@
 [package]
 name = "tqdm"
 edition = "2021"
-version = "0.4.3"
-readme = "README.md"
+version = "0.4.4"
+rust-version = "1.63.0"
 
+readme = "README.md"
 license = "MIT OR Apache-2.0"
 description = "Python tqdm in Rust"
 repository = "https://github.com/mrlazy1708/tqdm"
