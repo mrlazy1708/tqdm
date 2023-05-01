@@ -63,7 +63,7 @@ pub fn refresh() -> std::io::Result<()> {
         let lim = crossterm::terminal::size().map_or(80, |(width, _)| width as usize);
         let info: Vec<_> = tqdm.iter().filter_map(|info| info.lock().ok()).collect();
         for info in &info {
-            stderr.write_fmt(format_args!("{:<1$}", format!("{}", info), lim))?;
+            eprint!("{:<1$}", format!("{}", info), lim);
         }
 
         stderr.execute(crossterm::cursor::RestorePosition)?;
@@ -434,6 +434,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore]
     fn very_slow() {
         tqdm(0..100).for_each(|_| std::thread::sleep(Duration::from_secs_f64(10.0)));
     }
@@ -449,6 +450,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore]
     fn infinite() {
         for i in tqdm(0..).desc(Some("infinite")) {
             std::thread::sleep(Duration::from_secs_f64(0.1));
