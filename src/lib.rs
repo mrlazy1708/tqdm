@@ -331,16 +331,12 @@ mod config {
     ///
     /// Other styles are open for [contribution](https://github.com/mrlazy1708/tqdm/issues/1).
     ///
+    #[derive(Default)]
     pub enum Style {
         ASCII,
+        #[default]
         Block,
         Balloon,
-    }
-
-    impl Default for Style {
-        fn default() -> Style {
-            Style::Block
-        }
     }
 
     impl ToString for Style {
@@ -401,7 +397,7 @@ impl std::fmt::Display for Info {
                 let bra_ = format!("{}{:>3}%|", desc, (100.0 * pct) as usize);
                 let _ket = format!("| {}/{} [{}<{}, {:.02}it/s]", it, total, time, eta, its);
                 let tqdm = {
-                    let limit = width.checked_sub(bra_.len() + _ket.len()).unwrap_or(0);
+                    let limit = width.saturating_sub(bra_.len() + _ket.len());
                     let pattern: Vec<char> = style.to_string().chars().collect();
 
                     let m = pattern.len();
