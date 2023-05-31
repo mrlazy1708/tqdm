@@ -54,20 +54,25 @@ pub fn tqdm<Item, Iter: Iterator<Item = Item>>(iterable: Iter) -> Tqdm<Item, Ite
 ///
 pub fn refresh() -> std::io::Result<()> {
     let mut stderr = std::io::stderr();
+    let tqdm = TQDM.lock().unwrap();
 
-    use crossterm::ExecutableCommand;
-    stderr.execute(crossterm::cursor::MoveToColumn(0))?;
-    stderr.execute(crossterm::cursor::SavePosition)?;
+    use crossterm::queue;
+    use crossterm::style::Print;
 
-    if let Ok(tqdm) = TQDM.lock() {
-        let lim = crossterm::terminal::size().map_or(80, |(width, _)| width as usize);
-        let info: Vec<_> = tqdm.iter().filter_map(|info| info.lock().ok()).collect();
-        for info in &info {
-            eprint!("{:<1$}", format!("{}", info), lim);
+    if let Ok(position) = crossterm::cursor::position() {
+        if position.0 != 0 {
+            queue!(stderr, crossterm::cursor::MoveToNextLine(1))?;
         }
-
-        stderr.execute(crossterm::cursor::RestorePosition)?;
     }
+    queue!(stderr, crossterm::cursor::SavePosition)?;
+
+    let lim = crossterm::terminal::size().map_or(80, |(width, _)| width as usize);
+    let info = tqdm.iter().map(|info| info.lock().unwrap());
+    for info in info {
+        let info = format!("{}", info);
+        queue!(stderr, Print(format!("{:<lim$}\n", info)))?;
+    }
+    queue!(stderr, crossterm::cursor::RestorePosition)?;
 
     stderr.flush()
 }
