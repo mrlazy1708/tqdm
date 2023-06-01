@@ -6,6 +6,7 @@ fn example() {
 }
 
 #[test]
+#[ignore]
 fn very_slow() {
     tqdm(0..100).for_each(|_| thread::sleep(time::Duration::from_secs_f64(10.0)));
 }
@@ -21,6 +22,7 @@ fn range() {
 }
 
 #[test]
+#[ignore]
 fn infinite() {
     for i in tqdm(0..).desc(Some("infinite")) {
         thread::sleep(time::Duration::from_secs_f64(0.1));
