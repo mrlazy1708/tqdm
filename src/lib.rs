@@ -14,12 +14,14 @@ use std::io::Write;
 use std::ops::{Deref, DerefMut};
 
 extern crate crossterm;
-use crossterm::ExecutableCommand;
+use crossterm::QueueableCommand;
 
 #[cfg(test)]
 mod test;
 
 pub mod style;
+use crossterm::style::Print;
+use lazy_static::lazy_static;
 pub use style::Style;
 
 /* -------------------------------------------------------------------------- */
@@ -36,7 +38,7 @@ pub use style::Style;
 pub fn tqdm<Item, Iter: Iterator<Item = Item>>(iterable: Iter) -> Tqdm<Item, Iter> {
     let id = ID.fetch_add(1, sync::atomic::Ordering::SeqCst);
 
-    if let Ok(mut tqdm) = tqdms().write() {
+    if let Ok(mut tqdm) = TQDM.lock() {
         assert!(tqdm
             .insert(
                 id,
@@ -51,7 +53,7 @@ pub fn tqdm<Item, Iter: Iterator<Item = Item>>(iterable: Iter) -> Tqdm<Item, Ite
             .is_none());
     }
 
-    refresh(); // TODO
+    drop(refresh());
 
     Tqdm {
         iterable,
@@ -69,19 +71,21 @@ pub fn tqdm<Item, Iter: Iterator<Item = Item>>(iterable: Iter) -> Tqdm<Item, Ite
 pub fn refresh() -> io::Result<()> {
     let mut output = io::stderr();
 
-    if let Ok(tqdm) = tqdms().read() {
+    if let Ok(tqdm) = TQDM.lock() {
         let (ncols, _nrows) = size();
 
         // Cursor should be moved in critical section
-        output.execute(crossterm::cursor::SavePosition)?;
-        output.execute(crossterm::cursor::MoveToColumn(0))?;
+        let (cpos, _rpos) = crossterm::cursor::position()?;
+        if cpos != 0 {
+            output.queue(crossterm::cursor::MoveToNextLine(1))?;
+        }
+        output.queue(crossterm::cursor::SavePosition)?;
 
         for info in tqdm.values() {
-            output.write_fmt(format_args!("{:<1$}", format!("{}", info), ncols))?;
+            output.queue(Print(format_args!("{:<1$}\n", format!("{}", info), ncols)))?;
         }
 
-        output.execute(crossterm::cursor::RestorePosition)?;
-        output.execute(crossterm::cursor::MoveToColumn(ncols as u16))?;
+        output.queue(crossterm::cursor::RestorePosition)?;
     }
 
     output.flush()
@@ -160,11 +164,12 @@ impl<Item, Iter: Iterator<Item = Item>> Tqdm<Item, Iter> {
     /// ```
     ///
     pub fn desc<S: ToString>(self, desc: Option<S>) -> Self {
-        // if let Some(info) = &self.info {
-        //     if let Ok(mut info) = info.lock() {
-        //         info.config.desc = desc.map(|desc| desc.to_string());
-        //     }
-        // }
+        if let Ok(mut tqdm) = TQDM.lock() {
+            let info = tqdm.get_mut(&self.id);
+            if let Some(info) = info {
+                info.config.desc = desc.map(|desc| desc.to_string());
+            }
+        }
 
         self
     }
@@ -183,11 +188,12 @@ impl<Item, Iter: Iterator<Item = Item>> Tqdm<Item, Iter> {
     /// ```
     ///
     pub fn width(self, width: Option<usize>) -> Self {
-        // if let Some(info) = &self.info {
-        //     if let Ok(mut info) = info.lock() {
-        //         info.config.width = width;
-        //     }
-        // }
+        if let Ok(mut tqdm) = TQDM.lock() {
+            let info = tqdm.get_mut(&self.id);
+            if let Some(info) = info {
+                info.config.width = width;
+            }
+        }
 
         self
     }
@@ -204,11 +210,12 @@ impl<Item, Iter: Iterator<Item = Item>> Tqdm<Item, Iter> {
     /// ```
     ///
     pub fn style(self, style: Style) -> Self {
-        // if let Some(info) = &self.info {
-        //     if let Ok(mut info) = info.lock() {
-        //         info.config.style = style;
-        //     }
-        // }
+        if let Ok(mut tqdm) = TQDM.lock() {
+            let info = tqdm.get_mut(&self.id);
+            if let Some(info) = info {
+                info.config.style = style;
+            }
+        }
 
         self
     }
@@ -222,12 +229,14 @@ impl<Item, Iter: Iterator<Item = Item>> Tqdm<Item, Iter> {
     /// Manually close the bar and unregister it
     ///
     pub fn close(&mut self) -> io::Result<()> {
-        if let Ok(mut tqdm) = tqdms().write() {
-            let mut info = tqdm.remove(&self.id).unwrap();
-            info.nitem += self.step;
+        if let Ok(mut tqdm) = TQDM.lock() {
+            if let Some(mut info) = tqdm.remove(&self.id) {
+                info.nitem += self.step;
 
-            io::stderr().execute(crossterm::cursor::MoveToColumn(0))?;
-            io::stderr().write_fmt(format_args!("{}\n", format!("{}", info)))?;
+                io::stderr().queue(crossterm::cursor::MoveToColumn(0))?;
+                io::stderr().queue(Print(format!("{}\n", info)))?;
+                io::stderr().flush()?;
+            }
         }
 
         refresh()
@@ -239,14 +248,14 @@ impl<Item, Iter: Iterator<Item = Item>> Iterator for Tqdm<Item, Iter> {
 
     fn next(&mut self) -> Option<Self::Item> {
         if self.next.elapsed().is_ok() {
-            if let Ok(mut tqdm) = tqdms().write() {
+            if let Ok(mut tqdm) = TQDM.lock() {
                 let info = tqdm.get_mut(&self.id).unwrap();
 
                 info.nitem += self.step;
                 self.step = 0;
             }
 
-            refresh();
+            drop(refresh());
 
             self.next = time::SystemTime::now();
             self.next += time::Duration::from_secs_f64(1. / self.freqlim);
@@ -311,7 +320,11 @@ impl<Item, Iter: Iterator<Item = Item>> crate::Iter<Item> for Iter {}
 /* --------------------------------- STATIC --------------------------------- */
 
 static ID: sync::atomic::AtomicUsize = sync::atomic::AtomicUsize::new(0);
-static TQDM: sync::Mutex<Option<collections::HashMap<usize, Info>>> = sync::Mutex::new(None);
+
+lazy_static! {
+    static ref TQDM: sync::Mutex<collections::HashMap<usize, Info>> =
+        sync::Mutex::new(collections::HashMap::new());
+}
 
 // not working: need to find a way to initialize static HashMap
 

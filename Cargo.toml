@@ -16,3 +16,4 @@ categories = ["accessibility", "command-line-utilities"]
 
 [dependencies]
 crossterm = "0.25"
+lazy_static = "1.4.0"
