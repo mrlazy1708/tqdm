@@ -39,7 +39,7 @@ pub fn tqdm<Item, Iter: Iterator<Item = Item>>(iterable: Iter) -> Tqdm<Item, Ite
     let id = ID.fetch_add(1, sync::atomic::Ordering::SeqCst);
 
     if let Ok(mut tqdm) = TQDM.lock() {
-        assert!(tqdm
+        debug_assert!(tqdm
             .insert(
                 id,
                 Info {
@@ -74,18 +74,23 @@ pub fn refresh() -> io::Result<()> {
     if let Ok(tqdm) = TQDM.lock() {
         let (ncols, _nrows) = size();
 
-        // Cursor should be moved in critical section
-        let (cpos, _rpos) = crossterm::cursor::position()?;
-        if cpos != 0 {
-            output.queue(crossterm::cursor::MoveToNextLine(1))?;
+        if tqdm.is_empty() {
+            return Ok(());
         }
+
+        // Cursor should be moved in critical section
+        output.queue(crossterm::cursor::Hide)?;
+        output.queue(crossterm::cursor::MoveToColumn(0))?;
         output.queue(crossterm::cursor::SavePosition)?;
 
         for info in tqdm.values() {
-            output.queue(Print(format_args!("{:<1$}\n", format!("{}", info), ncols)))?;
+            let info = format!("{}", info);
+            output.queue(Print(format!("{:<1$}", info, ncols)))?;
         }
 
         output.queue(crossterm::cursor::RestorePosition)?;
+        output.queue(crossterm::cursor::MoveToColumn(ncols as u16))?;
+        output.queue(crossterm::cursor::Show)?;
     }
 
     output.flush()
