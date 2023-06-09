@@ -2,7 +2,7 @@
 name = "tqdm"
 edition = "2021"
 version = "0.4.4"
-rust-version = "1.63.0"
+rust-version = "1.70.0"
 
 readme = "README.md"
 license = "MIT OR Apache-2.0"
@@ -16,4 +16,3 @@ categories = ["accessibility", "command-line-utilities"]
 
 [dependencies]
 crossterm = "0.25"
-lazy_static = "1.4.0"

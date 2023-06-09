@@ -10,18 +10,19 @@
 
 use std::*;
 
-use std::io::Write;
-use std::ops::{Deref, DerefMut};
+use std::{
+    collections::HashMap,
+    io::Write,
+    ops::{Deref, DerefMut},
+    sync::{Mutex, OnceLock},
+};
 
-extern crate crossterm;
-use crossterm::QueueableCommand;
+use crossterm::{style::Print, QueueableCommand};
 
 #[cfg(test)]
 mod test;
 
 pub mod style;
-use crossterm::style::Print;
-use lazy_static::lazy_static;
 pub use style::Style;
 
 /* -------------------------------------------------------------------------- */
@@ -38,19 +39,18 @@ pub use style::Style;
 pub fn tqdm<Item, Iter: Iterator<Item = Item>>(iterable: Iter) -> Tqdm<Item, Iter> {
     let id = ID.fetch_add(1, sync::atomic::Ordering::SeqCst);
 
-    if let Ok(mut tqdm) = TQDM.lock() {
-        debug_assert!(tqdm
-            .insert(
-                id,
-                Info {
-                    begin: time::SystemTime::now(),
-                    config: Config::default(),
+    let tqdm = TQDM.get_or_init(|| Mutex::new(HashMap::new()));
+    if let Ok(mut tqdm) = tqdm.lock() {
+        tqdm.insert(
+            id,
+            Info {
+                begin: time::SystemTime::now(),
+                config: Config::default(),
 
-                    nitem: 0usize,
-                    total: iterable.size_hint().1,
-                },
-            )
-            .is_none());
+                nitem: 0usize,
+                total: iterable.size_hint().1,
+            },
+        );
     }
 
     drop(refresh());
@@ -71,7 +71,7 @@ pub fn tqdm<Item, Iter: Iterator<Item = Item>>(iterable: Iter) -> Tqdm<Item, Ite
 pub fn refresh() -> io::Result<()> {
     let mut output = io::stderr();
 
-    if let Ok(tqdm) = TQDM.lock() {
+    if let Ok(tqdm) = tqdms().lock() {
         let (ncols, _nrows) = size();
 
         if tqdm.is_empty() {
@@ -169,7 +169,7 @@ impl<Item, Iter: Iterator<Item = Item>> Tqdm<Item, Iter> {
     /// ```
     ///
     pub fn desc<S: ToString>(self, desc: Option<S>) -> Self {
-        if let Ok(mut tqdm) = TQDM.lock() {
+        if let Ok(mut tqdm) = tqdms().lock() {
             let info = tqdm.get_mut(&self.id);
             if let Some(info) = info {
                 info.config.desc = desc.map(|desc| desc.to_string());
@@ -193,7 +193,7 @@ impl<Item, Iter: Iterator<Item = Item>> Tqdm<Item, Iter> {
     /// ```
     ///
     pub fn width(self, width: Option<usize>) -> Self {
-        if let Ok(mut tqdm) = TQDM.lock() {
+        if let Ok(mut tqdm) = tqdms().lock() {
             let info = tqdm.get_mut(&self.id);
             if let Some(info) = info {
                 info.config.width = width;
@@ -215,7 +215,7 @@ impl<Item, Iter: Iterator<Item = Item>> Tqdm<Item, Iter> {
     /// ```
     ///
     pub fn style(self, style: Style) -> Self {
-        if let Ok(mut tqdm) = TQDM.lock() {
+        if let Ok(mut tqdm) = tqdms().lock() {
             let info = tqdm.get_mut(&self.id);
             if let Some(info) = info {
                 info.config.style = style;
@@ -234,7 +234,7 @@ impl<Item, Iter: Iterator<Item = Item>> Tqdm<Item, Iter> {
     /// Manually close the bar and unregister it
     ///
     pub fn close(&mut self) -> io::Result<()> {
-        if let Ok(mut tqdm) = TQDM.lock() {
+        if let Ok(mut tqdm) = tqdms().lock() {
             if let Some(mut info) = tqdm.remove(&self.id) {
                 info.nitem += self.step;
 
@@ -253,7 +253,7 @@ impl<Item, Iter: Iterator<Item = Item>> Iterator for Tqdm<Item, Iter> {
 
     fn next(&mut self) -> Option<Self::Item> {
         if self.next.elapsed().is_ok() {
-            if let Ok(mut tqdm) = TQDM.lock() {
+            if let Ok(mut tqdm) = tqdms().lock() {
                 let info = tqdm.get_mut(&self.id).unwrap();
 
                 info.nitem += self.step;
@@ -325,17 +325,17 @@ impl<Item, Iter: Iterator<Item = Item>> crate::Iter<Item> for Iter {}
 /* --------------------------------- STATIC --------------------------------- */
 
 static ID: sync::atomic::AtomicUsize = sync::atomic::AtomicUsize::new(0);
-
-lazy_static! {
-    static ref TQDM: sync::Mutex<collections::HashMap<usize, Info>> =
-        sync::Mutex::new(collections::HashMap::new());
-}
+static TQDM: OnceLock<Mutex<HashMap<usize, Info>>> = OnceLock::new();
 
 // not working: need to find a way to initialize static HashMap
 
 fn size<T: From<u16>>() -> (T, T) {
     let (width, height) = crossterm::terminal::size().unwrap_or((80, 64));
     (T::from(width), T::from(height))
+}
+
+fn tqdms() -> &'static Mutex<HashMap<usize, Info>> {
+    TQDM.get().unwrap()
 }
 
 /* --------------------------------- CONFIG --------------------------------- */
