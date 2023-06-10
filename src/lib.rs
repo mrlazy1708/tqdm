@@ -10,14 +10,10 @@
 
 use std::*;
 
-use std::{
-    collections::HashMap,
-    io::Write,
-    ops::{Deref, DerefMut},
-    sync::{Mutex, OnceLock},
-};
+use std::io::Write;
+use std::ops::{Deref, DerefMut};
 
-use crossterm::{style::Print, QueueableCommand};
+use crossterm::QueueableCommand;
 
 #[cfg(test)]
 mod test;
@@ -39,8 +35,7 @@ pub use style::Style;
 pub fn tqdm<Item, Iter: Iterator<Item = Item>>(iterable: Iter) -> Tqdm<Item, Iter> {
     let id = ID.fetch_add(1, sync::atomic::Ordering::SeqCst);
 
-    let tqdm = TQDM.get_or_init(|| Mutex::new(HashMap::new()));
-    if let Ok(mut tqdm) = tqdm.lock() {
+    if let Ok(mut tqdm) = tqdms().lock() {
         tqdm.insert(
             id,
             Info {
@@ -85,7 +80,7 @@ pub fn refresh() -> io::Result<()> {
 
         for info in tqdm.values() {
             let info = format!("{}", info);
-            output.queue(Print(format!("{:<1$}", info, ncols)))?;
+            output.queue(crossterm::style::Print(format!("{:<1$}", info, ncols)))?;
         }
 
         output.queue(crossterm::cursor::RestorePosition)?;
@@ -134,6 +129,7 @@ pub fn refresh() -> io::Result<()> {
 /// }
 /// ```
 ///
+
 pub struct Tqdm<Item, Iter: Iterator<Item = Item>> {
     /// Iterable wrapped
     pub iterable: Iter,
@@ -239,8 +235,7 @@ impl<Item, Iter: Iterator<Item = Item>> Tqdm<Item, Iter> {
                 info.nitem += self.step;
 
                 io::stderr().queue(crossterm::cursor::MoveToColumn(0))?;
-                io::stderr().queue(Print(format!("{}\n", info)))?;
-                io::stderr().flush()?;
+                io::stderr().queue(crossterm::style::Print(format!("{}\n", info)))?;
             }
         }
 
@@ -325,22 +320,21 @@ impl<Item, Iter: Iterator<Item = Item>> crate::Iter<Item> for Iter {}
 /* --------------------------------- STATIC --------------------------------- */
 
 static ID: sync::atomic::AtomicUsize = sync::atomic::AtomicUsize::new(0);
-static TQDM: OnceLock<Mutex<HashMap<usize, Info>>> = OnceLock::new();
-
-// not working: need to find a way to initialize static HashMap
+static BAR: sync::OnceLock<sync::Mutex<collections::HashMap<usize, Info>>> = sync::OnceLock::new();
 
 fn size<T: From<u16>>() -> (T, T) {
     let (width, height) = crossterm::terminal::size().unwrap_or((80, 64));
     (T::from(width), T::from(height))
 }
 
-fn tqdms() -> &'static Mutex<HashMap<usize, Info>> {
-    TQDM.get().unwrap()
+fn tqdms() -> &'static sync::Mutex<collections::HashMap<usize, Info>> {
+    BAR.get_or_init(|| sync::Mutex::new(collections::HashMap::new()))
 }
 
 /* --------------------------------- CONFIG --------------------------------- */
 
 #[derive(Default)]
+
 pub struct Config {
     pub desc: Option<String>,
     pub width: Option<usize>,
