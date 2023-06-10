@@ -27,11 +27,10 @@ pub use style::Style;
 
 /* -------------------------------- FUNCTION -------------------------------- */
 
-///
 /// Wrap [Iterator] like it in Python. This function creates a default progress
 /// bar object and registers it to the global collection. The returned iterator
 /// [Deref] to the given one and will update its tqdm whenever `next` is called.
-///
+
 pub fn tqdm<Item, Iter: Iterator<Item = Item>>(iterable: Iter) -> Tqdm<Item, Iter> {
     let id = ID.fetch_add(1, sync::atomic::Ordering::SeqCst);
 
@@ -60,9 +59,8 @@ pub fn tqdm<Item, Iter: Iterator<Item = Item>>(iterable: Iter) -> Tqdm<Item, Ite
     }
 }
 
-///
 /// Manually refresh all progress bars
-///
+
 pub fn refresh() -> io::Result<()> {
     let mut output = io::stderr();
 
@@ -73,7 +71,7 @@ pub fn refresh() -> io::Result<()> {
             return Ok(());
         }
 
-        // Cursor should be moved in critical section
+        // cursor should be moved in critical section
         output.queue(crossterm::cursor::Hide)?;
         output.queue(crossterm::cursor::MoveToColumn(0))?;
         output.queue(crossterm::cursor::SavePosition)?;
@@ -93,7 +91,6 @@ pub fn refresh() -> io::Result<()> {
 
 /* --------------------------------- STRUCT --------------------------------- */
 
-///
 /// Iterator wrapper that updates progress bar on `next`
 ///
 ///
@@ -128,7 +125,6 @@ pub fn refresh() -> io::Result<()> {
 ///     handle.join().unwrap();
 /// }
 /// ```
-///
 
 pub struct Tqdm<Item, Iter: Iterator<Item = Item>> {
     /// Iterable wrapped
@@ -147,11 +143,8 @@ pub struct Tqdm<Item, Iter: Iterator<Item = Item>> {
     freqlim: f64,
 }
 
-///
-/// Configure progress bar
-///
 impl<Item, Iter: Iterator<Item = Item>> Tqdm<Item, Iter> {
-    ///
+
     /// Configure progress bar's name
     ///
     /// * `desc` - bar description
@@ -163,7 +156,7 @@ impl<Item, Iter: Iterator<Item = Item>> Tqdm<Item, Iter> {
     /// ```
     /// tqdm(0..100).desc(Some("Bar1"))
     /// ```
-    ///
+
     pub fn desc<S: ToString>(self, desc: Option<S>) -> Self {
         if let Ok(mut tqdm) = tqdms().lock() {
             let info = tqdm.get_mut(&self.id);
@@ -175,7 +168,6 @@ impl<Item, Iter: Iterator<Item = Item>> Tqdm<Item, Iter> {
         self
     }
 
-    ///
     /// Configure progress bar's width
     ///
     /// * `width` - width limitation
@@ -187,7 +179,7 @@ impl<Item, Iter: Iterator<Item = Item>> Tqdm<Item, Iter> {
     /// ```
     /// tqdm(0..100).width(Some(100))
     /// ```
-    ///
+
     pub fn width(self, width: Option<usize>) -> Self {
         if let Ok(mut tqdm) = tqdms().lock() {
             let info = tqdm.get_mut(&self.id);
@@ -199,7 +191,6 @@ impl<Item, Iter: Iterator<Item = Item>> Tqdm<Item, Iter> {
         self
     }
 
-    ///
     /// Configure progress bar's style
     ///
     /// * `style` - `enum` of the style
@@ -209,7 +200,7 @@ impl<Item, Iter: Iterator<Item = Item>> Tqdm<Item, Iter> {
     /// ```
     /// tqdm(0..100).style(tqdm::Style::Balloon)
     /// ```
-    ///
+
     pub fn style(self, style: Style) -> Self {
         if let Ok(mut tqdm) = tqdms().lock() {
             let info = tqdm.get_mut(&self.id);
@@ -222,13 +213,10 @@ impl<Item, Iter: Iterator<Item = Item>> Tqdm<Item, Iter> {
     }
 }
 
-///
-/// Progress bar operations
-///
 impl<Item, Iter: Iterator<Item = Item>> Tqdm<Item, Iter> {
-    ///
+
     /// Manually close the bar and unregister it
-    ///
+
     pub fn close(&mut self) -> io::Result<()> {
         if let Ok(mut tqdm) = tqdms().lock() {
             if let Some(mut info) = tqdm.remove(&self.id) {
@@ -293,7 +281,7 @@ impl<Item, Iter: Iterator<Item = Item>> Drop for Tqdm<Item, Iter> {
 
 /* ---------------------------------- TRAIT --------------------------------- */
 
-/// Public trait that allow `.tqdm()` method chaining, equivalent to `tqdm::tqdm(iter)`
+/// Trait that allows `.tqdm()` method chaining, equivalent to `tqdm::tqdm(iter)`
 ///
 ///
 /// ## Examples
@@ -301,7 +289,7 @@ impl<Item, Iter: Iterator<Item = Item>> Drop for Tqdm<Item, Iter> {
 /// use tqdm::Iter;
 /// (0..).take(1000).tqdm()
 /// ```
-///
+
 pub trait Iter<Item>: Iterator<Item = Item> {
     fn tqdm(self) -> Tqdm<Item, Self>
     where
@@ -362,7 +350,7 @@ impl fmt::Display for Info {
         let desc = desc.clone().map_or(String::new(), |desc| desc + ": ");
         let width = width.unwrap_or_else(|| size().0);
 
-        /// Time format omitting leading 0
+        /// time format omitting leading 0
         fn ftime(seconds: usize) -> String {
             let m = seconds / 60 % 60;
             let s = seconds % 60;

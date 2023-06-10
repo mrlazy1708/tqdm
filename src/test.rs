@@ -1,17 +1,20 @@
 use crate::*;
 
 #[test]
+
 fn example() {
     tqdm(0..100).for_each(|_| thread::sleep(time::Duration::from_secs_f64(0.01)));
 }
 
 #[test]
 #[ignore]
+
 fn very_slow() {
     tqdm(0..100).for_each(|_| thread::sleep(time::Duration::from_secs_f64(10.0)));
 }
 
 #[test]
+
 fn range() {
     for i in tqdm(0..100).desc(Some("range")).width(Some(82)) {
         thread::sleep(time::Duration::from_secs_f64(0.1));
@@ -23,6 +26,7 @@ fn range() {
 
 #[test]
 #[ignore]
+
 fn infinite() {
     for i in tqdm(0..).desc(Some("infinite")) {
         thread::sleep(time::Duration::from_secs_f64(0.1));
@@ -33,6 +37,7 @@ fn infinite() {
 }
 
 #[test]
+
 fn parallel() {
     let threads: Vec<_> = [
         (200, Style::ASCII),
@@ -60,6 +65,7 @@ fn parallel() {
 }
 
 #[test]
+
 fn performance() {
     let ntest = 100000000;
 
