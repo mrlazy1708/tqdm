@@ -2,7 +2,7 @@ use crate::*;
 
 #[test]
 
-fn example() {
+fn base() {
     tqdm(0..100).for_each(|_| thread::sleep(time::Duration::from_secs_f64(0.01)));
 }
 
@@ -14,21 +14,18 @@ fn very_slow() {
 }
 
 #[test]
+#[ignore]
 
-fn range() {
-    for i in tqdm(0..100).desc(Some("range")).width(Some(82)) {
+fn infinite() {
+    for _ in tqdm(0..).desc(Some("infinite")) {
         thread::sleep(time::Duration::from_secs_f64(0.1));
-        if i % 10 == 0 {
-            println!("break #{}", i);
-        }
     }
 }
 
 #[test]
-#[ignore]
 
-fn infinite() {
-    for i in tqdm(0..).desc(Some("infinite")) {
+fn breaking() {
+    for i in tqdm(0..100).desc(Some("breaking")) {
         thread::sleep(time::Duration::from_secs_f64(0.1));
         if i % 10 == 0 {
             println!("break #{}", i);
@@ -67,29 +64,21 @@ fn parallel() {
 #[test]
 
 fn performance() {
-    let ntest = 100000000;
-
-    let start = time::SystemTime::now();
-    for _i in 0..ntest {}
-    println!(
-        "Baseline: {:.02}it/s",
-        ntest as f64
+    const N: usize = 100000000;
+    fn speed(start: time::SystemTime) -> f64 {
+        N as f64
             / time::SystemTime::now()
                 .duration_since(start)
                 .unwrap()
                 .as_millis() as f64
             * 1000.0
-    );
+    }
 
     let start = time::SystemTime::now();
-    for _i in tqdm(0..ntest) {}
-    println!(
-        "With tqdm: {:.02}it/s",
-        ntest as f64
-            / time::SystemTime::now()
-                .duration_since(start)
-                .unwrap()
-                .as_millis() as f64
-            * 1000.0
-    );
+    for _i in 0..N {}
+    println!("baseline: {:.02}it/s", speed(start));
+
+    let start = time::SystemTime::now();
+    for _i in tqdm(0..N) {}
+    println!("w/ tqdm: {:.02}it/s", speed(start));
 }

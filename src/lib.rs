@@ -67,22 +67,23 @@ pub fn refresh() -> io::Result<()> {
     if let Ok(tqdm) = tqdms().lock() {
         let (ncols, _nrows) = size();
 
+        let n = tqdm.len();
         if tqdm.is_empty() {
             return Ok(());
         }
 
-        // cursor should be moved in critical section
         output.queue(crossterm::cursor::Hide)?;
         output.queue(crossterm::cursor::MoveToColumn(0))?;
-        output.queue(crossterm::cursor::SavePosition)?;
 
         for info in tqdm.values() {
-            let info = format!("{}", info);
-            output.queue(crossterm::style::Print(format!("{:<1$}", info, ncols)))?;
+            let bar = format!("{:<1$}", format!("{}", info), ncols);
+            output.queue(crossterm::style::Print(bar))?;
         }
 
-        output.queue(crossterm::cursor::RestorePosition)?;
-        output.queue(crossterm::cursor::MoveToColumn(ncols as u16))?;
+        if let Some(rows) = num::NonZeroUsize::new(n - 1) {
+            output.queue(crossterm::cursor::MoveUp(rows.get() as u16))?;
+        }
+
         output.queue(crossterm::cursor::Show)?;
     }
 
@@ -144,7 +145,6 @@ pub struct Tqdm<Item, Iter: Iterator<Item = Item>> {
 }
 
 impl<Item, Iter: Iterator<Item = Item>> Tqdm<Item, Iter> {
-
     /// Configure progress bar's name
     ///
     /// * `desc` - bar description
@@ -214,17 +214,15 @@ impl<Item, Iter: Iterator<Item = Item>> Tqdm<Item, Iter> {
 }
 
 impl<Item, Iter: Iterator<Item = Item>> Tqdm<Item, Iter> {
-
     /// Manually close the bar and unregister it
 
     pub fn close(&mut self) -> io::Result<()> {
         if let Ok(mut tqdm) = tqdms().lock() {
-            if let Some(mut info) = tqdm.remove(&self.id) {
-                info.nitem += self.step;
+            let mut info = tqdm.remove(&self.id).unwrap();
+            info.nitem += self.step;
 
-                io::stderr().queue(crossterm::cursor::MoveToColumn(0))?;
-                io::stderr().queue(crossterm::style::Print(format!("{}\n", info)))?;
-            }
+            io::stderr().queue(crossterm::cursor::MoveToColumn(0))?;
+            io::stderr().queue(crossterm::style::Print(format!("{}\n", info)))?;
         }
 
         refresh()
@@ -253,7 +251,6 @@ impl<Item, Iter: Iterator<Item = Item>> Iterator for Tqdm<Item, Iter> {
             self.step += 1;
             Some(next)
         } else {
-            drop(self.close());
             None
         }
     }
@@ -350,7 +347,7 @@ impl fmt::Display for Info {
         let desc = desc.clone().map_or(String::new(), |desc| desc + ": ");
         let width = width.unwrap_or_else(|| size().0);
 
-        /// time format omitting leading 0
+        /// Time format omitting leading 0
         fn ftime(seconds: usize) -> String {
             let m = seconds / 60 % 60;
             let s = seconds % 60;
