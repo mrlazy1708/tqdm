@@ -15,6 +15,11 @@ use std::ops::{Deref, DerefMut};
 
 use crossterm::QueueableCommand;
 
+#[cfg(extern_once_cell)]
+use once_cell::sync::OnceCell as OnceLock;
+#[cfg(std_once_cell)]
+use std::sync::OnceLock;
+
 #[cfg(test)]
 mod test;
 
@@ -305,7 +310,7 @@ impl<Item, Iter: Iterator<Item = Item>> crate::Iter<Item> for Iter {}
 /* --------------------------------- STATIC --------------------------------- */
 
 static ID: sync::atomic::AtomicUsize = sync::atomic::AtomicUsize::new(0);
-static BAR: sync::OnceLock<sync::Mutex<collections::HashMap<usize, Info>>> = sync::OnceLock::new();
+static BAR: OnceLock<sync::Mutex<collections::HashMap<usize, Info>>> = OnceLock::new();
 
 fn size<T: From<u16>>() -> (T, T) {
     let (width, height) = crossterm::terminal::size().unwrap_or((80, 64));
