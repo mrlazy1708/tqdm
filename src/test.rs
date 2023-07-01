@@ -63,6 +63,28 @@ fn parallel() {
 
 #[test]
 
+fn overflow() {
+    let threads: Vec<_> = (0..30)
+        .map(|idx| {
+            thread::spawn(move || {
+                for _i in tqdm(0..100)
+                    .style(Style::ASCII)
+                    .width(Some(82))
+                    .desc(Some(format!("par {}", idx).as_str()))
+                {
+                    thread::sleep(time::Duration::from_millis(10));
+                }
+            })
+        })
+        .collect();
+
+    for handle in threads {
+        handle.join().unwrap();
+    }
+}
+
+#[test]
+
 fn performance() {
     const N: usize = 100000000;
     fn speed(start: time::SystemTime) -> f64 {

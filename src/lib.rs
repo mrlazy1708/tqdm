@@ -65,9 +65,8 @@ pub fn refresh() -> io::Result<()> {
     let mut output = io::stderr();
 
     if let Ok(tqdm) = tqdms().lock() {
-        let (ncols, _nrows) = size();
+        let (ncols, nrows) = size();
 
-        let n = tqdm.len();
         if tqdm.is_empty() {
             return Ok(());
         }
@@ -75,12 +74,23 @@ pub fn refresh() -> io::Result<()> {
         output.queue(crossterm::cursor::Hide)?;
         output.queue(crossterm::cursor::MoveToColumn(0))?;
 
-        for info in tqdm.values() {
+        for info in tqdm.values().take(nrows - 1) {
             let bar = format!("{:<1$}", format!("{}", info), ncols);
             output.queue(crossterm::style::Print(bar))?;
         }
 
-        if let Some(rows) = num::NonZeroUsize::new(n - 1) {
+        let nbars = tqdm.len();
+
+        let overflowed = nbars as i32 - nrows as i32 >= 1;
+        if overflowed {
+            output.queue(crossterm::terminal::Clear(
+                crossterm::terminal::ClearType::FromCursorDown,
+            ))?;
+            output.queue(crossterm::style::Print(" ... (more hidden) ..."))?;
+            output.queue(crossterm::cursor::MoveToColumn(0))?;
+        }
+
+        if let Some(rows) = num::NonZeroUsize::new(nbars - 1) {
             output.queue(crossterm::cursor::MoveUp(rows.get() as u16))?;
         }
 
