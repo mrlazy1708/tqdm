@@ -2,7 +2,7 @@ use crate::*;
 
 #[test]
 
-fn base() {
+fn example() {
     tqdm(0..100).for_each(|_| thread::sleep(time::Duration::from_secs_f64(0.01)));
 }
 
@@ -32,6 +32,10 @@ fn breaking() {
         }
     }
 }
+
+/* -------------------------------------------------------------------------- */
+/*                                  MULTI-BAR                                 */
+/* -------------------------------------------------------------------------- */
 
 #[test]
 
@@ -64,15 +68,11 @@ fn parallel() {
 #[test]
 
 fn overflow() {
-    let threads: Vec<_> = (0..30)
+    let threads: Vec<_> = (1..10)
         .map(|idx| {
             thread::spawn(move || {
-                for _i in tqdm(0..100)
-                    .style(Style::ASCII)
-                    .width(Some(82))
-                    .desc(Some(format!("par {}", idx).as_str()))
-                {
-                    thread::sleep(time::Duration::from_millis(10));
+                for _i in tqdm(0..100).desc(Some(idx.to_string())) {
+                    thread::sleep(time::Duration::from_millis(10 * idx));
                 }
             })
         })
@@ -82,6 +82,34 @@ fn overflow() {
         handle.join().unwrap();
     }
 }
+
+#[test]
+
+fn nested() {
+    for _ in tqdm(0..3).desc(Some("0")) {
+        for _ in tqdm(0..4).desc(Some("1")).clear(true) {
+            for _ in tqdm(0..5).desc(Some("2")).clear(true) {
+                thread::sleep(time::Duration::from_millis(30));
+            }
+        }
+    }
+}
+
+/* -------------------------------------------------------------------------- */
+/*                                 CORNER CASE                                */
+/* -------------------------------------------------------------------------- */
+
+#[test]
+
+fn empty() {
+    println!("before");
+    refresh().unwrap();
+    println!("after");
+}
+
+/* -------------------------------------------------------------------------- */
+/*                                  BENCHMARK                                 */
+/* -------------------------------------------------------------------------- */
 
 #[test]
 

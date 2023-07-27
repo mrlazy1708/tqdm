@@ -13,6 +13,7 @@ use std::*;
 use std::io::Write;
 use std::ops::{Deref, DerefMut};
 
+extern crate crossterm;
 use crossterm::QueueableCommand;
 
 #[cfg(test)]
@@ -62,8 +63,6 @@ pub fn tqdm<Item, Iter: Iterator<Item = Item>>(iterable: Iter) -> Tqdm<Item, Ite
 /// Manually refresh all progress bars
 
 pub fn refresh() -> io::Result<()> {
-    let mut output = io::stderr();
-
     if let Ok(tqdm) = tqdms().lock() {
         let (ncols, nrows) = size();
 
@@ -71,33 +70,31 @@ pub fn refresh() -> io::Result<()> {
             return Ok(());
         }
 
-        output.queue(crossterm::cursor::Hide)?;
-        output.queue(crossterm::cursor::MoveToColumn(0))?;
+        io::stderr().queue(crossterm::cursor::Hide)?;
+        io::stderr().queue(crossterm::cursor::MoveToColumn(0))?;
 
         for info in tqdm.values().take(nrows - 1) {
             let bar = format!("{:<1$}", format!("{}", info), ncols);
-            output.queue(crossterm::style::Print(bar))?;
+            io::stderr().queue(crossterm::style::Print(bar))?;
         }
 
         let nbars = tqdm.len();
-
-        let overflowed = nbars as i32 - nrows as i32 >= 1;
-        if overflowed {
-            output.queue(crossterm::terminal::Clear(
+        if nbars >= nrows + 1 {
+            io::stderr().queue(crossterm::terminal::Clear(
                 crossterm::terminal::ClearType::FromCursorDown,
             ))?;
-            output.queue(crossterm::style::Print(" ... (more hidden) ..."))?;
-            output.queue(crossterm::cursor::MoveToColumn(0))?;
+            io::stderr().queue(crossterm::style::Print(" ... (more hidden) ..."))?;
+            io::stderr().queue(crossterm::cursor::MoveToColumn(0))?;
         }
 
         if let Some(rows) = num::NonZeroUsize::new(nbars - 1) {
-            output.queue(crossterm::cursor::MoveUp(rows.get() as u16))?;
+            io::stderr().queue(crossterm::cursor::MoveUp(rows.get() as u16))?;
         }
 
-        output.queue(crossterm::cursor::Show)?;
+        io::stderr().queue(crossterm::cursor::Show)?;
     }
 
-    output.flush()
+    io::stderr().flush()
 }
 
 /* --------------------------------- STRUCT --------------------------------- */
@@ -221,6 +218,28 @@ impl<Item, Iter: Iterator<Item = Item>> Tqdm<Item, Iter> {
 
         self
     }
+
+    /// Behavior of after termination
+    ///
+    /// * `clear` - true: remove this bar as if never created
+    ///           - false: leave completed bar at the very top
+    ///
+    ///
+    /// ## Examples
+    /// ```
+    /// tqdm(0..100).clear(true)
+    /// ```
+
+    pub fn clear(self, clear: bool) -> Self {
+        if let Ok(mut tqdm) = tqdms().lock() {
+            let info = tqdm.get_mut(&self.id);
+            if let Some(info) = info {
+                info.config.clear = clear;
+            }
+        }
+
+        self
+    }
 }
 
 impl<Item, Iter: Iterator<Item = Item>> Tqdm<Item, Iter> {
@@ -232,7 +251,15 @@ impl<Item, Iter: Iterator<Item = Item>> Tqdm<Item, Iter> {
             info.nitem += self.step;
 
             io::stderr().queue(crossterm::cursor::MoveToColumn(0))?;
-            io::stderr().queue(crossterm::style::Print(format!("{}\n", info)))?;
+            if info.config.clear {
+                io::stderr().queue(crossterm::cursor::MoveDown(tqdm.len() as u16))?;
+                io::stderr().queue(crossterm::terminal::Clear(
+                    crossterm::terminal::ClearType::CurrentLine,
+                ))?;
+                io::stderr().queue(crossterm::cursor::MoveUp(tqdm.len() as u16))?;
+            } else {
+                io::stderr().queue(crossterm::style::Print(format!("{}\n", info)))?;
+            }
         }
 
         refresh()
@@ -318,7 +345,7 @@ static ID: sync::atomic::AtomicUsize = sync::atomic::AtomicUsize::new(0);
 static BAR: sync::OnceLock<sync::Mutex<collections::HashMap<usize, Info>>> = sync::OnceLock::new();
 
 fn size<T: From<u16>>() -> (T, T) {
-    let (width, height) = crossterm::terminal::size().unwrap_or((80, 64));
+    let (width, height) = crossterm::terminal::size().unwrap_or((80, 24));
     (T::from(width), T::from(height))
 }
 
@@ -330,10 +357,12 @@ fn tqdms() -> &'static sync::Mutex<collections::HashMap<usize, Info>> {
 
 #[derive(Default)]
 
-pub struct Config {
-    pub desc: Option<String>,
-    pub width: Option<usize>,
-    pub style: style::Style,
+struct Config {
+    desc: Option<String>,
+    width: Option<usize>,
+    style: style::Style,
+
+    clear: bool,
 }
 
 /* ---------------------------------- INFO ---------------------------------- */
@@ -353,7 +382,9 @@ impl fmt::Display for Info {
             time.as_ref().map_or(0., time::Duration::as_secs_f64)
         };
 
-        let Config { desc, width, style } = &self.config;
+        let Config {
+            desc, width, style, ..
+        } = &self.config;
         let desc = desc.clone().map_or(String::new(), |desc| desc + ": ");
         let width = width.unwrap_or_else(|| size().0);
 
