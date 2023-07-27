@@ -35,7 +35,7 @@ pub use style::Style;
 pub fn tqdm<Item, Iter: Iterator<Item = Item>>(iterable: Iter) -> Tqdm<Item, Iter> {
     let id = ID.fetch_add(1, sync::atomic::Ordering::SeqCst);
 
-    if let Ok(mut tqdm) = tqdms().lock() {
+    if let Ok(mut tqdm) = bars().lock() {
         tqdm.insert(
             id,
             Info {
@@ -63,7 +63,7 @@ pub fn tqdm<Item, Iter: Iterator<Item = Item>>(iterable: Iter) -> Tqdm<Item, Ite
 /// Manually refresh all progress bars
 
 pub fn refresh() -> io::Result<()> {
-    if let Ok(tqdm) = tqdms().lock() {
+    if let Ok(tqdm) = bars().lock() {
         let (ncols, nrows) = size();
 
         if tqdm.is_empty() {
@@ -165,7 +165,7 @@ impl<Item, Iter: Iterator<Item = Item>> Tqdm<Item, Iter> {
     /// ```
 
     pub fn desc<S: ToString>(self, desc: Option<S>) -> Self {
-        if let Ok(mut tqdm) = tqdms().lock() {
+        if let Ok(mut tqdm) = bars().lock() {
             let info = tqdm.get_mut(&self.id);
             if let Some(info) = info {
                 info.config.desc = desc.map(|desc| desc.to_string());
@@ -188,7 +188,7 @@ impl<Item, Iter: Iterator<Item = Item>> Tqdm<Item, Iter> {
     /// ```
 
     pub fn width(self, width: Option<usize>) -> Self {
-        if let Ok(mut tqdm) = tqdms().lock() {
+        if let Ok(mut tqdm) = bars().lock() {
             let info = tqdm.get_mut(&self.id);
             if let Some(info) = info {
                 info.config.width = width;
@@ -209,7 +209,7 @@ impl<Item, Iter: Iterator<Item = Item>> Tqdm<Item, Iter> {
     /// ```
 
     pub fn style(self, style: Style) -> Self {
-        if let Ok(mut tqdm) = tqdms().lock() {
+        if let Ok(mut tqdm) = bars().lock() {
             let info = tqdm.get_mut(&self.id);
             if let Some(info) = info {
                 info.config.style = style;
@@ -231,7 +231,7 @@ impl<Item, Iter: Iterator<Item = Item>> Tqdm<Item, Iter> {
     /// ```
 
     pub fn clear(self, clear: bool) -> Self {
-        if let Ok(mut tqdm) = tqdms().lock() {
+        if let Ok(mut tqdm) = bars().lock() {
             let info = tqdm.get_mut(&self.id);
             if let Some(info) = info {
                 info.config.clear = clear;
@@ -246,7 +246,7 @@ impl<Item, Iter: Iterator<Item = Item>> Tqdm<Item, Iter> {
     /// Manually close the bar and unregister it
 
     pub fn close(&mut self) -> io::Result<()> {
-        if let Ok(mut tqdm) = tqdms().lock() {
+        if let Ok(mut tqdm) = bars().lock() {
             let mut info = tqdm.remove(&self.id).unwrap();
             info.nitem += self.step;
 
@@ -271,7 +271,7 @@ impl<Item, Iter: Iterator<Item = Item>> Iterator for Tqdm<Item, Iter> {
 
     fn next(&mut self) -> Option<Self::Item> {
         if self.next.elapsed().is_ok() {
-            if let Ok(mut tqdm) = tqdms().lock() {
+            if let Ok(mut tqdm) = bars().lock() {
                 let info = tqdm.get_mut(&self.id).unwrap();
 
                 info.nitem += self.step;
@@ -342,15 +342,15 @@ impl<Item, Iter: Iterator<Item = Item>> crate::Iter<Item> for Iter {}
 /* --------------------------------- STATIC --------------------------------- */
 
 static ID: sync::atomic::AtomicUsize = sync::atomic::AtomicUsize::new(0);
-static BAR: sync::OnceLock<sync::Mutex<collections::HashMap<usize, Info>>> = sync::OnceLock::new();
+static BAR: sync::OnceLock<sync::Mutex<collections::BTreeMap<usize, Info>>> = sync::OnceLock::new();
 
 fn size<T: From<u16>>() -> (T, T) {
     let (width, height) = crossterm::terminal::size().unwrap_or((80, 24));
     (T::from(width), T::from(height))
 }
 
-fn tqdms() -> &'static sync::Mutex<collections::HashMap<usize, Info>> {
-    BAR.get_or_init(|| sync::Mutex::new(collections::HashMap::new()))
+fn bars() -> &'static sync::Mutex<collections::BTreeMap<usize, Info>> {
+    BAR.get_or_init(|| sync::Mutex::new(collections::BTreeMap::new()))
 }
 
 /* --------------------------------- CONFIG --------------------------------- */
