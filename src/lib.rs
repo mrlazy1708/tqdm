@@ -79,7 +79,7 @@ pub fn refresh() -> io::Result<()> {
         }
 
         let nbars = tqdm.len();
-        if nbars >= nrows + 1 {
+        if nbars > nrows {
             io::stderr().queue(crossterm::terminal::Clear(
                 crossterm::terminal::ClearType::FromCursorDown,
             ))?;
