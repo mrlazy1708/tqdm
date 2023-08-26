@@ -16,6 +16,9 @@ use std::ops::{Deref, DerefMut};
 extern crate crossterm;
 use crossterm::QueueableCommand;
 
+#[macro_use]
+extern crate lazy_static;
+
 #[cfg(test)]
 mod test;
 
@@ -35,7 +38,7 @@ pub use style::Style;
 pub fn tqdm<Item, Iter: Iterator<Item = Item>>(iterable: Iter) -> Tqdm<Item, Iter> {
     let id = ID.fetch_add(1, sync::atomic::Ordering::SeqCst);
 
-    if let Ok(mut tqdm) = bars().lock() {
+    if let Ok(mut tqdm) = BAR.lock() {
         tqdm.insert(
             id,
             Info {
@@ -63,7 +66,7 @@ pub fn tqdm<Item, Iter: Iterator<Item = Item>>(iterable: Iter) -> Tqdm<Item, Ite
 /// Manually refresh all progress bars
 
 pub fn refresh() -> io::Result<()> {
-    if let Ok(tqdm) = bars().lock() {
+    if let Ok(tqdm) = BAR.lock() {
         let (ncols, nrows) = size();
 
         if tqdm.is_empty() {
@@ -165,7 +168,7 @@ impl<Item, Iter: Iterator<Item = Item>> Tqdm<Item, Iter> {
     /// ```
 
     pub fn desc<S: ToString>(self, desc: Option<S>) -> Self {
-        if let Ok(mut tqdm) = bars().lock() {
+        if let Ok(mut tqdm) = BAR.lock() {
             let info = tqdm.get_mut(&self.id);
             if let Some(info) = info {
                 info.config.desc = desc.map(|desc| desc.to_string());
@@ -188,7 +191,7 @@ impl<Item, Iter: Iterator<Item = Item>> Tqdm<Item, Iter> {
     /// ```
 
     pub fn width(self, width: Option<usize>) -> Self {
-        if let Ok(mut tqdm) = bars().lock() {
+        if let Ok(mut tqdm) = BAR.lock() {
             let info = tqdm.get_mut(&self.id);
             if let Some(info) = info {
                 info.config.width = width;
@@ -209,7 +212,7 @@ impl<Item, Iter: Iterator<Item = Item>> Tqdm<Item, Iter> {
     /// ```
 
     pub fn style(self, style: Style) -> Self {
-        if let Ok(mut tqdm) = bars().lock() {
+        if let Ok(mut tqdm) = BAR.lock() {
             let info = tqdm.get_mut(&self.id);
             if let Some(info) = info {
                 info.config.style = style;
@@ -231,7 +234,7 @@ impl<Item, Iter: Iterator<Item = Item>> Tqdm<Item, Iter> {
     /// ```
 
     pub fn clear(self, clear: bool) -> Self {
-        if let Ok(mut tqdm) = bars().lock() {
+        if let Ok(mut tqdm) = BAR.lock() {
             let info = tqdm.get_mut(&self.id);
             if let Some(info) = info {
                 info.config.clear = clear;
@@ -246,7 +249,7 @@ impl<Item, Iter: Iterator<Item = Item>> Tqdm<Item, Iter> {
     /// Manually close the bar and unregister it
 
     pub fn close(&mut self) -> io::Result<()> {
-        if let Ok(mut tqdm) = bars().lock() {
+        if let Ok(mut tqdm) = BAR.lock() {
             let mut info = tqdm.remove(&self.id).unwrap();
             info.nitem += self.step;
 
@@ -271,7 +274,7 @@ impl<Item, Iter: Iterator<Item = Item>> Iterator for Tqdm<Item, Iter> {
 
     fn next(&mut self) -> Option<Self::Item> {
         if self.next.elapsed().is_ok() {
-            if let Ok(mut tqdm) = bars().lock() {
+            if let Ok(mut tqdm) = BAR.lock() {
                 let info = tqdm.get_mut(&self.id).unwrap();
 
                 info.nitem += self.step;
@@ -341,21 +344,18 @@ impl<Item, Iter: Iterator<Item = Item>> crate::Iter<Item> for Iter {}
 
 /* --------------------------------- STATIC --------------------------------- */
 
-static ID: sync::atomic::AtomicUsize = sync::atomic::AtomicUsize::new(0);
-static BAR: sync::OnceLock<sync::Mutex<collections::BTreeMap<usize, Info>>> = sync::OnceLock::new();
+lazy_static! {
+    static ref ID: sync::atomic::AtomicUsize = sync::atomic::AtomicUsize::new(0);
+    static ref BAR: sync::Mutex<collections::BTreeMap<usize, Info>> =
+        sync::Mutex::new(collections::BTreeMap::new());
+}
 
 fn size<T: From<u16>>() -> (T, T) {
     let (width, height) = crossterm::terminal::size().unwrap_or((80, 24));
     (T::from(width), T::from(height))
 }
 
-fn bars() -> &'static sync::Mutex<collections::BTreeMap<usize, Info>> {
-    BAR.get_or_init(|| sync::Mutex::new(collections::BTreeMap::new()))
-}
-
 /* --------------------------------- CONFIG --------------------------------- */
-
-#[derive(Default)]
 
 struct Config {
     desc: Option<String>,
@@ -363,6 +363,17 @@ struct Config {
     style: style::Style,
 
     clear: bool,
+}
+
+impl Default for Config {
+    fn default() -> Self {
+        Config {
+            desc: None,
+            width: None,
+            style: Style::default(),
+            clear: false,
+        }
+    }
 }
 
 /* ---------------------------------- INFO ---------------------------------- */

@@ -6,15 +6,16 @@
 //!
 //! Other styles are open for [contribution](https://github.com/mrlazy1708/tqdm/issues/1).
 
-#[derive(Default)]
-
 pub enum Style {
     ASCII,
-
-    #[default]
     Block,
-
     Balloon,
+}
+
+impl Default for Style {
+    fn default() -> Self {
+        Style::ASCII
+    }
 }
 
 impl ToString for Style {
