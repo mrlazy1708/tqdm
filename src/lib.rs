@@ -12,7 +12,6 @@ use std::*;
 
 use std::io::Write;
 use std::ops::{Deref, DerefMut};
-
 use std::time::{Duration, SystemTime};
 
 extern crate anyhow;
@@ -233,6 +232,27 @@ impl<Item, Iter: Iterator<Item = Item>> Tqdm<Item, Iter> {
             let info = tqdm.get_mut(&self.id);
             if let Some(info) = info {
                 info.config.style = style;
+            }
+        }
+
+        self
+    }
+
+    /// Exponential smoothing factor
+    ///
+    /// * `smoothing` - weight for the current update
+    ///
+    ///
+    /// ## Examples
+    /// ```
+    /// tqdm(0..100).smoothing(0.9999)
+    /// ```
+
+    pub fn smoothing(self, smoothing: f64) -> Self {
+        if let Ok(mut tqdm) = BAR.lock() {
+            let info = tqdm.get_mut(&self.id);
+            if let Some(info) = info {
+                info.config.smoothing = smoothing;
             }
         }
 
