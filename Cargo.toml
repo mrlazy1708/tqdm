@@ -15,5 +15,6 @@ keywords = ["tqdm", "progress", "iterator"]
 categories = ["accessibility", "command-line-utilities"]
 
 [dependencies]
+anyhow = "1.0"
 crossterm = "0.25"
 lazy_static = "1.4"

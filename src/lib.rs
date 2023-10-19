@@ -13,6 +13,11 @@ use std::*;
 use std::io::Write;
 use std::ops::{Deref, DerefMut};
 
+use std::time::{Duration, SystemTime};
+
+extern crate anyhow;
+use anyhow::Result;
+
 extern crate crossterm;
 use crossterm::QueueableCommand;
 
@@ -42,30 +47,39 @@ pub fn tqdm<Item, Iter: Iterator<Item = Item>>(iterable: Iter) -> Tqdm<Item, Ite
         tqdm.insert(
             id,
             Info {
-                begin: time::SystemTime::now(),
                 config: Config::default(),
 
-                nitem: 0usize,
+                it: 0,
+                its: None,
                 total: iterable.size_hint().1,
+
+                t0: time::SystemTime::now(),
+                prev: time::UNIX_EPOCH,
             },
         );
     }
 
-    drop(refresh());
+    if let Err(err) = refresh() {
+        eprintln!("{}", err)
+    }
 
     Tqdm {
         iterable,
         id,
 
         next: time::UNIX_EPOCH,
-        step: 0usize,
-        freqlim: 24.,
+        step: 0,
+
+        mininterval: Duration::from_secs_f64(1. / 24.),
+        miniters: 0,
     }
 }
 
-/// Manually refresh all progress bars
+/// Manually refresh all tqdms
 
-pub fn refresh() -> io::Result<()> {
+pub fn refresh() -> Result<()> {
+    let mut out = io::stderr();
+
     if let Ok(tqdm) = BAR.lock() {
         let (ncols, nrows) = size();
 
@@ -73,31 +87,33 @@ pub fn refresh() -> io::Result<()> {
             return Ok(());
         }
 
-        io::stderr().queue(crossterm::cursor::Hide)?;
-        io::stderr().queue(crossterm::cursor::MoveToColumn(0))?;
+        out.queue(crossterm::cursor::Hide)?;
+        out.queue(crossterm::cursor::MoveToColumn(0))?;
+
+        let time = SystemTime::now();
 
         for info in tqdm.values().take(nrows - 1) {
-            let bar = format!("{:<1$}", format!("{}", info), ncols);
-            io::stderr().queue(crossterm::style::Print(bar))?;
+            let bar = format!("{:<1$}", info.format(time)?, ncols);
+            out.queue(crossterm::style::Print(bar))?;
         }
 
         let nbars = tqdm.len();
         if nbars > nrows {
-            io::stderr().queue(crossterm::terminal::Clear(
+            out.queue(crossterm::terminal::Clear(
                 crossterm::terminal::ClearType::FromCursorDown,
             ))?;
-            io::stderr().queue(crossterm::style::Print(" ... (more hidden) ..."))?;
-            io::stderr().queue(crossterm::cursor::MoveToColumn(0))?;
+            out.queue(crossterm::style::Print(" ... (more hidden) ..."))?;
+            out.queue(crossterm::cursor::MoveToColumn(0))?;
         }
 
         if let Some(rows) = num::NonZeroUsize::new(nbars - 1) {
-            io::stderr().queue(crossterm::cursor::MoveUp(rows.get() as u16))?;
+            out.queue(crossterm::cursor::MoveUp(rows.get() as u16))?;
         }
 
-        io::stderr().queue(crossterm::cursor::Show)?;
+        out.queue(crossterm::cursor::Show)?;
     }
 
-    io::stderr().flush()
+    Ok(out.flush()?)
 }
 
 /* --------------------------------- STRUCT --------------------------------- */
@@ -141,17 +157,18 @@ pub struct Tqdm<Item, Iter: Iterator<Item = Item>> {
     /// Iterable wrapped
     pub iterable: Iter,
 
-    /// Hashed
+    /// Hash
     id: usize,
 
     /// Next refresh time
     next: time::SystemTime,
 
-    /// Cached updates
+    /// Cached
     step: usize,
 
-    /// Refresh frequency
-    freqlim: f64,
+    /// Refresh limit
+    mininterval: Duration,
+    miniters: usize,
 }
 
 impl<Item, Iter: Iterator<Item = Item>> Tqdm<Item, Iter> {
@@ -248,20 +265,25 @@ impl<Item, Iter: Iterator<Item = Item>> Tqdm<Item, Iter> {
 impl<Item, Iter: Iterator<Item = Item>> Tqdm<Item, Iter> {
     /// Manually close the bar and unregister it
 
-    pub fn close(&mut self) -> io::Result<()> {
-        if let Ok(mut tqdm) = BAR.lock() {
-            let mut info = tqdm.remove(&self.id).unwrap();
-            info.nitem += self.step;
+    pub fn close(&mut self) -> Result<()> {
+        let time = SystemTime::now();
+        let mut out = io::stderr();
 
-            io::stderr().queue(crossterm::cursor::MoveToColumn(0))?;
-            if info.config.clear {
-                io::stderr().queue(crossterm::cursor::MoveDown(tqdm.len() as u16))?;
-                io::stderr().queue(crossterm::terminal::Clear(
-                    crossterm::terminal::ClearType::CurrentLine,
-                ))?;
-                io::stderr().queue(crossterm::cursor::MoveUp(tqdm.len() as u16))?;
-            } else {
-                io::stderr().queue(crossterm::style::Print(format!("{}\n", info)))?;
+        if let Ok(mut tqdm) = BAR.lock() {
+            if let Some(mut info) = tqdm.remove(&self.id) {
+                info.update(time, self.step);
+
+                out.queue(crossterm::cursor::MoveToColumn(0))?;
+                if info.config.clear {
+                    out.queue(crossterm::cursor::MoveDown(tqdm.len() as u16))?;
+                    out.queue(crossterm::terminal::Clear(
+                        crossterm::terminal::ClearType::CurrentLine,
+                    ))?;
+                    out.queue(crossterm::cursor::MoveUp(tqdm.len() as u16))?;
+                } else {
+                    out.queue(crossterm::style::Print(info.format(time)?))?;
+                    out.queue(crossterm::style::Print("\n"))?;
+                }
             }
         }
 
@@ -273,18 +295,22 @@ impl<Item, Iter: Iterator<Item = Item>> Iterator for Tqdm<Item, Iter> {
     type Item = Item;
 
     fn next(&mut self) -> Option<Self::Item> {
-        if self.next.elapsed().is_ok() {
-            if let Ok(mut tqdm) = BAR.lock() {
-                let info = tqdm.get_mut(&self.id).unwrap();
+        if self.step >= self.miniters {
+            let now = SystemTime::now();
+            if now >= self.next {
+                if let Ok(mut tqdm) = BAR.lock() {
+                    if let Some(info) = tqdm.get_mut(&self.id) {
+                        info.update(now, self.step);
+                        self.step = 0;
+                    }
+                }
 
-                info.nitem += self.step;
-                self.step = 0;
+                if let Err(err) = refresh() {
+                    eprintln!("{}", err)
+                }
+
+                self.next = now + self.mininterval;
             }
-
-            drop(refresh());
-
-            self.next = time::SystemTime::now();
-            self.next += time::Duration::from_secs_f64(1. / self.freqlim);
         }
 
         if let Some(next) = self.iterable.next() {
@@ -316,7 +342,9 @@ impl<Item, Iter: Iterator<Item = Item>> DerefMut for Tqdm<Item, Iter> {
 
 impl<Item, Iter: Iterator<Item = Item>> Drop for Tqdm<Item, Iter> {
     fn drop(&mut self) {
-        drop(self.close());
+        if let Err(err) = self.close() {
+            eprintln!("{}", err)
+        }
     }
 }
 
@@ -365,7 +393,7 @@ struct Config {
     desc: Option<String>,
     width: Option<usize>,
     style: style::Style,
-
+    smoothing: f64,
     clear: bool,
 }
 
@@ -375,6 +403,7 @@ impl Default for Config {
             desc: None,
             width: None,
             style: Style::default(),
+            smoothing: 0.3,
             clear: false,
         }
     }
@@ -383,25 +412,26 @@ impl Default for Config {
 /* ---------------------------------- INFO ---------------------------------- */
 
 struct Info {
-    begin: time::SystemTime,
     config: Config,
 
-    nitem: usize,
+    it: usize,
+    its: Option<f64>,
     total: Option<usize>,
+
+    t0: time::SystemTime,
+    prev: time::SystemTime,
 }
 
-impl fmt::Display for Info {
-    fn fmt(&self, fmt: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let elapsed = {
-            let time = self.begin.elapsed();
-            time.as_ref().map_or(0., time::Duration::as_secs_f64)
-        };
+impl Info {
+    fn format(&self, t: SystemTime) -> Result<String> {
+        let desc = self
+            .config
+            .desc
+            .clone()
+            .map_or(String::new(), |desc| desc + ": ");
+        let width = self.config.width.unwrap_or_else(|| size().0);
 
-        let Config {
-            desc, width, style, ..
-        } = &self.config;
-        let desc = desc.clone().map_or(String::new(), |desc| desc + ": ");
-        let width = width.unwrap_or_else(|| size().0);
+        let elapsed = ftime(t.duration_since(self.t0)?.as_secs_f64() as usize);
 
         /// Time format omitting leading 0
         fn ftime(seconds: usize) -> String {
@@ -413,25 +443,27 @@ impl fmt::Display for Info {
             }
         }
 
-        let it = self.nitem;
-        let its = it as f64 / elapsed;
-        let time = ftime(elapsed as usize);
+        let it = self.it;
+        let its = match self.its {
+            None => String::from("?"),
+            Some(its) => format!("{:.02}", its),
+        };
 
-        match self.total {
-            None => fmt.write_fmt(format_args!("{}{}it [{}, {:.02}it/s]", desc, it, time, its)),
+        Ok(match self.total {
+            None => format_args!("{}{}it [{}, {}it/s]", desc, it, elapsed, its).to_string(),
 
             Some(total) => {
                 let pct = (it as f64 / total as f64).clamp(0.0, 1.0);
-                let eta = match it {
-                    0 => String::from("?"),
-                    _ => ftime((elapsed / pct * (1. - pct)) as usize),
+                let eta = match self.its {
+                    None => String::from("?"),
+                    Some(its) => ftime(((total - it) as f64 / its) as usize),
                 };
 
                 let bra_ = format!("{}{:>3}%|", desc, (100.0 * pct) as usize);
-                let _ket = format!("| {}/{} [{}<{}, {:.02}it/s]", it, total, time, eta, its);
+                let _ket = format!("| {}/{} [{}<{}, {}it/s]", it, total, elapsed, eta, its);
                 let tqdm = {
                     let limit = width.saturating_sub(bra_.len() + _ket.len());
-                    let pattern: Vec<_> = style.to_string().chars().collect();
+                    let pattern: Vec<_> = self.config.style.to_string().chars().collect();
 
                     let m = pattern.len();
                     let n = ((limit as f64 * pct) * m as f64) as usize;
@@ -443,8 +475,26 @@ impl fmt::Display for Info {
                     }
                 };
 
-                fmt.write_fmt(format_args!("{}{}{}", bra_, tqdm, _ket))
+                format_args!("{}{}{}", bra_, tqdm, _ket).to_string()
             }
+        })
+    }
+
+    fn update(&mut self, t: SystemTime, n: usize) {
+        if self.prev != time::UNIX_EPOCH {
+            let dt = t.duration_since(self.prev).unwrap();
+            let its = n as f64 / dt.as_secs_f64();
+
+            self.its = match self.its {
+                None => Some(its),
+                Some(ema) => {
+                    let beta = self.config.smoothing;
+                    Some(its * beta + ema * (1. - beta))
+                }
+            };
         }
+
+        self.prev = t;
+        self.it += n;
     }
 }
