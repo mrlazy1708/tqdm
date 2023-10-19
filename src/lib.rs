@@ -294,6 +294,10 @@ impl<Item, Iter: Iterator<Item = Item>> Iterator for Tqdm<Item, Iter> {
             None
         }
     }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        self.iterable.size_hint()
+    }
 }
 
 impl<Item, Iter: Iterator<Item = Item>> Deref for Tqdm<Item, Iter> {
