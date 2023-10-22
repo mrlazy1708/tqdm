@@ -8,11 +8,26 @@
 //! Most traits are bypassed with [auto-dereference](https://doc.rust-lang.org/std/ops/trait.Deref.html), so original methods can be called with no overhead.
 //!
 
-use std::*;
+#![no_std]
 
-use std::io::Write;
-use std::ops::{Deref, DerefMut};
-use std::time::{Duration, SystemTime};
+extern crate core;
+extern crate std;
+
+use core::{
+    num,
+    ops::{Deref, DerefMut},
+    sync,
+    time::Duration,
+};
+use std::{
+    collections::BTreeMap,
+    eprintln, format,
+    io::{self, Write},
+    string::{String, ToString},
+    sync::Mutex,
+    time::{SystemTime, UNIX_EPOCH},
+    vec::Vec,
+};
 
 extern crate anyhow;
 use anyhow::Result;
@@ -52,8 +67,8 @@ pub fn tqdm<Item, Iter: Iterator<Item = Item>>(iterable: Iter) -> Tqdm<Item, Ite
                 its: None,
                 total: iterable.size_hint().1,
 
-                t0: time::SystemTime::now(),
-                prev: time::UNIX_EPOCH,
+                t0: SystemTime::now(),
+                prev: UNIX_EPOCH,
             },
         );
     }
@@ -66,7 +81,7 @@ pub fn tqdm<Item, Iter: Iterator<Item = Item>>(iterable: Iter) -> Tqdm<Item, Ite
         iterable,
         id,
 
-        next: time::UNIX_EPOCH,
+        next: UNIX_EPOCH,
         step: 0,
 
         mininterval: Duration::from_secs_f64(1. / 24.),
@@ -160,7 +175,7 @@ pub struct Tqdm<Item, Iter: Iterator<Item = Item>> {
     id: usize,
 
     /// Next refresh time
-    next: time::SystemTime,
+    next: SystemTime,
 
     /// Cached
     step: usize,
@@ -397,8 +412,7 @@ impl<Item, Iter: Iterator<Item = Item>> crate::Iter<Item> for Iter {}
 /* --------------------------------- STATIC --------------------------------- */
 
 static ID: Lazy<sync::atomic::AtomicUsize> = Lazy::new(|| sync::atomic::AtomicUsize::new(0));
-static BAR: Lazy<sync::Mutex<collections::BTreeMap<usize, Info>>> =
-    Lazy::new(|| sync::Mutex::new(collections::BTreeMap::new()));
+static BAR: Lazy<Mutex<BTreeMap<usize, Info>>> = Lazy::new(|| Mutex::new(BTreeMap::new()));
 
 fn size<T: From<u16>>() -> (T, T) {
     let (width, height) = crossterm::terminal::size().unwrap_or((80, 24));
@@ -436,8 +450,8 @@ struct Info {
     its: Option<f64>,
     total: Option<usize>,
 
-    t0: time::SystemTime,
-    prev: time::SystemTime,
+    t0: SystemTime,
+    prev: SystemTime,
 }
 
 impl Info {
@@ -499,7 +513,7 @@ impl Info {
     }
 
     fn update(&mut self, t: SystemTime, n: usize) {
-        if self.prev != time::UNIX_EPOCH {
+        if self.prev != UNIX_EPOCH {
             let dt = t.duration_since(self.prev).unwrap();
             let its = n as f64 / dt.as_secs_f64();
 
