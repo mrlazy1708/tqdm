@@ -5,6 +5,7 @@
 //! - `Balloon`: Simulate balloon explosion with `".oO@*"`. Inspired by [stackoverflow](https://stackoverflow.com/a/2685509/17570263)
 //!
 //! Other styles are open for [contribution](https://github.com/mrlazy1708/tqdm/issues/1).
+use std::string::{String, ToString};
 
 pub enum Style {
     ASCII,
