@@ -19,9 +19,10 @@ use anyhow::Result;
 
 extern crate crossterm;
 use crossterm::QueueableCommand;
+use crossterm::{cursor, terminal};
 
-extern crate once_cell;
-use once_cell::sync::Lazy;
+#[macro_use]
+extern crate lazy_static;
 
 #[cfg(test)]
 mod test;
@@ -29,50 +30,8 @@ mod test;
 pub mod style;
 pub use style::Style;
 
-/* -------------------------------------------------------------------------- */
-/*                                    TQDM                                    */
-/* -------------------------------------------------------------------------- */
-
-/* -------------------------------- FUNCTION -------------------------------- */
-
-/// Wrap [Iterator] like it in Python. This function creates a default progress
-/// bar object and registers it to the global collection. The returned iterator
-/// [Deref] to the given one and will update its tqdm whenever `next` is called.
-
-pub fn tqdm<Item, Iter: Iterator<Item = Item>>(iterable: Iter) -> Tqdm<Item, Iter> {
-    let id = ID.fetch_add(1, sync::atomic::Ordering::SeqCst);
-
-    if let Ok(mut tqdm) = BAR.lock() {
-        tqdm.insert(
-            id,
-            Info {
-                config: Config::default(),
-
-                it: 0,
-                its: None,
-                total: iterable.size_hint().1,
-
-                t0: time::SystemTime::now(),
-                prev: time::UNIX_EPOCH,
-            },
-        );
-    }
-
-    if let Err(err) = refresh() {
-        eprintln!("{}", err)
-    }
-
-    Tqdm {
-        iterable,
-        id,
-
-        next: time::UNIX_EPOCH,
-        step: 0,
-
-        mininterval: Duration::from_secs_f64(1. / 24.),
-        miniters: 0,
-    }
-}
+pub mod r#async;
+pub use r#async::tqdm_async;
 
 /// Manually refresh all tqdms
 
@@ -86,8 +45,8 @@ pub fn refresh() -> Result<()> {
             return Ok(());
         }
 
-        out.queue(crossterm::cursor::Hide)?;
-        out.queue(crossterm::cursor::MoveToColumn(0))?;
+        out.queue(cursor::Hide)?;
+        out.queue(cursor::MoveToColumn(0))?;
 
         let time = SystemTime::now();
 
@@ -97,25 +56,36 @@ pub fn refresh() -> Result<()> {
         }
 
         let nbars = tqdm.len();
-        if nbars > nrows {
-            out.queue(crossterm::terminal::Clear(
-                crossterm::terminal::ClearType::FromCursorDown,
-            ))?;
+        if nbars >= nrows {
+            out.queue(terminal::Clear(terminal::ClearType::FromCursorDown))?;
             out.queue(crossterm::style::Print(" ... (more hidden) ..."))?;
-            out.queue(crossterm::cursor::MoveToColumn(0))?;
+            out.queue(cursor::MoveToColumn(0))?;
         }
 
         if let Some(rows) = num::NonZeroUsize::new(nbars - 1) {
-            out.queue(crossterm::cursor::MoveUp(rows.get() as u16))?;
+            out.queue(cursor::MoveUp(rows.get() as u16))?;
         }
 
-        out.queue(crossterm::cursor::Show)?;
+        out.queue(cursor::Show)?;
     }
 
     Ok(out.flush()?)
 }
 
-/* --------------------------------- STRUCT --------------------------------- */
+/* -------------------------------------------------------------------------- */
+/*                                    TQDM                                    */
+/* -------------------------------------------------------------------------- */
+
+/// Wrap [Iterator] like it in Python. This function creates a default progress
+/// bar object and registers it to the global collection. The returned iterator
+/// [Deref] to the given one and will update its tqdm whenever `next` is called.
+
+pub fn tqdm<Iter: IntoIterator>(iterable: Iter) -> Tqdm<Iter::IntoIter> {
+    let iter = iterable.into_iter();
+    let pbar = pbar(iter.size_hint().1);
+
+    Tqdm { iter, pbar }
+}
 
 /// Iterator wrapper that updates progress bar on `next`
 ///
@@ -152,25 +122,12 @@ pub fn refresh() -> Result<()> {
 /// }
 /// ```
 
-pub struct Tqdm<Item, Iter: Iterator<Item = Item>> {
-    /// Iterable wrapped
-    pub iterable: Iter,
-
-    /// Hash
-    id: usize,
-
-    /// Next refresh time
-    next: time::SystemTime,
-
-    /// Cached
-    step: usize,
-
-    /// Refresh limit
-    mininterval: Duration,
-    miniters: usize,
+pub struct Tqdm<Iter> {
+    pub iter: Iter,
+    pub pbar: Pbar,
 }
 
-impl<Item, Iter: Iterator<Item = Item>> Tqdm<Item, Iter> {
+impl<Iter> Tqdm<Iter> {
     /// Configure progress bar's name
     ///
     /// * `desc` - bar description
@@ -185,7 +142,7 @@ impl<Item, Iter: Iterator<Item = Item>> Tqdm<Item, Iter> {
 
     pub fn desc<S: ToString>(self, desc: Option<S>) -> Self {
         if let Ok(mut tqdm) = BAR.lock() {
-            let info = tqdm.get_mut(&self.id);
+            let info = tqdm.get_mut(&self.pbar.id);
             if let Some(info) = info {
                 info.config.desc = desc.map(|desc| desc.to_string());
             }
@@ -208,7 +165,7 @@ impl<Item, Iter: Iterator<Item = Item>> Tqdm<Item, Iter> {
 
     pub fn width(self, width: Option<usize>) -> Self {
         if let Ok(mut tqdm) = BAR.lock() {
-            let info = tqdm.get_mut(&self.id);
+            let info = tqdm.get_mut(&self.pbar.id);
             if let Some(info) = info {
                 info.config.width = width;
             }
@@ -229,7 +186,7 @@ impl<Item, Iter: Iterator<Item = Item>> Tqdm<Item, Iter> {
 
     pub fn style(self, style: Style) -> Self {
         if let Ok(mut tqdm) = BAR.lock() {
-            let info = tqdm.get_mut(&self.id);
+            let info = tqdm.get_mut(&self.pbar.id);
             if let Some(info) = info {
                 info.config.style = style;
             }
@@ -250,7 +207,7 @@ impl<Item, Iter: Iterator<Item = Item>> Tqdm<Item, Iter> {
 
     pub fn smoothing(self, smoothing: f64) -> Self {
         if let Ok(mut tqdm) = BAR.lock() {
-            let info = tqdm.get_mut(&self.id);
+            let info = tqdm.get_mut(&self.pbar.id);
             if let Some(info) = info {
                 info.config.smoothing = smoothing;
             }
@@ -272,7 +229,7 @@ impl<Item, Iter: Iterator<Item = Item>> Tqdm<Item, Iter> {
 
     pub fn clear(self, clear: bool) -> Self {
         if let Ok(mut tqdm) = BAR.lock() {
-            let info = tqdm.get_mut(&self.id);
+            let info = tqdm.get_mut(&self.pbar.id);
             if let Some(info) = info {
                 info.config.clear = clear;
             }
@@ -282,7 +239,114 @@ impl<Item, Iter: Iterator<Item = Item>> Tqdm<Item, Iter> {
     }
 }
 
-impl<Item, Iter: Iterator<Item = Item>> Tqdm<Item, Iter> {
+impl<Iter: Iterator> Iterator for Tqdm<Iter> {
+    type Item = Iter::Item;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if let Some(next) = self.iter.next() {
+            if let Err(err) = self.update(1) {
+                eprintln!("{}", err);
+            }
+            Some(next)
+        } else {
+            None
+        }
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        self.iter.size_hint()
+    }
+}
+
+impl<Iter: Iterator> Deref for Tqdm<Iter> {
+    type Target = Pbar;
+
+    fn deref(&self) -> &Self::Target {
+        &self.pbar
+    }
+}
+
+impl<Iter: Iterator> DerefMut for Tqdm<Iter> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.pbar
+    }
+}
+
+/* -------------------------------------------------------------------------- */
+/*                                    PBAR                                    */
+/* -------------------------------------------------------------------------- */
+
+pub fn pbar(total: Option<usize>) -> Pbar {
+    let id = ID.fetch_add(1, sync::atomic::Ordering::SeqCst);
+    if let Ok(mut tqdm) = BAR.lock() {
+        tqdm.insert(
+            id,
+            Info {
+                config: Config::default(),
+
+                it: 0,
+                its: None,
+                total,
+
+                t0: SystemTime::now(),
+                prev: time::UNIX_EPOCH,
+            },
+        );
+    }
+
+    if let Err(err) = refresh() {
+        eprintln!("{}", err)
+    }
+
+    Pbar {
+        id,
+
+        next: time::UNIX_EPOCH,
+        step: 0,
+
+        mininterval: Duration::from_secs_f64(1. / 24.),
+        miniters: 1,
+    }
+}
+
+pub struct Pbar {
+    /// Hash
+    id: usize,
+
+    /// Next refresh time
+    next: SystemTime,
+
+    /// Cached
+    step: usize,
+
+    /// Refresh limit
+    mininterval: Duration,
+    miniters: usize,
+}
+
+impl Pbar {
+    /// Manually update the progress bar
+
+    pub fn update(&mut self, n: usize) -> Result<()> {
+        self.step += n;
+
+        if self.step >= self.miniters {
+            let now = SystemTime::now();
+            if now >= self.next {
+                if let Ok(mut tqdm) = BAR.lock() {
+                    if let Some(info) = tqdm.get_mut(&self.id) {
+                        info.update(now, self.step);
+                        self.step = 0;
+                    }
+                }
+
+                self.next = now + self.mininterval;
+            }
+        }
+
+        refresh()
+    }
+
     /// Manually close the bar and unregister it
 
     pub fn close(&mut self) -> Result<()> {
@@ -293,13 +357,12 @@ impl<Item, Iter: Iterator<Item = Item>> Tqdm<Item, Iter> {
             if let Some(mut info) = tqdm.remove(&self.id) {
                 info.update(time, self.step);
 
-                out.queue(crossterm::cursor::MoveToColumn(0))?;
+                out.queue(cursor::MoveToColumn(0))?;
+
                 if info.config.clear {
-                    out.queue(crossterm::cursor::MoveDown(tqdm.len() as u16))?;
-                    out.queue(crossterm::terminal::Clear(
-                        crossterm::terminal::ClearType::CurrentLine,
-                    ))?;
-                    out.queue(crossterm::cursor::MoveUp(tqdm.len() as u16))?;
+                    out.queue(cursor::MoveDown(tqdm.len() as u16))?;
+                    out.queue(terminal::Clear(terminal::ClearType::CurrentLine))?;
+                    out.queue(cursor::MoveUp(tqdm.len() as u16))?;
                 } else {
                     out.queue(crossterm::style::Print(info.format(time)?))?;
                     out.queue(crossterm::style::Print("\n"))?;
@@ -311,56 +374,7 @@ impl<Item, Iter: Iterator<Item = Item>> Tqdm<Item, Iter> {
     }
 }
 
-impl<Item, Iter: Iterator<Item = Item>> Iterator for Tqdm<Item, Iter> {
-    type Item = Item;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        if self.step >= self.miniters {
-            let now = SystemTime::now();
-            if now >= self.next {
-                if let Ok(mut tqdm) = BAR.lock() {
-                    if let Some(info) = tqdm.get_mut(&self.id) {
-                        info.update(now, self.step);
-                        self.step = 0;
-                    }
-                }
-
-                if let Err(err) = refresh() {
-                    eprintln!("{}", err)
-                }
-
-                self.next = now + self.mininterval;
-            }
-        }
-
-        if let Some(next) = self.iterable.next() {
-            self.step += 1;
-            Some(next)
-        } else {
-            None
-        }
-    }
-
-    fn size_hint(&self) -> (usize, Option<usize>) {
-        self.iterable.size_hint()
-    }
-}
-
-impl<Item, Iter: Iterator<Item = Item>> Deref for Tqdm<Item, Iter> {
-    type Target = Iter;
-
-    fn deref(&self) -> &Self::Target {
-        &self.iterable
-    }
-}
-
-impl<Item, Iter: Iterator<Item = Item>> DerefMut for Tqdm<Item, Iter> {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.iterable
-    }
-}
-
-impl<Item, Iter: Iterator<Item = Item>> Drop for Tqdm<Item, Iter> {
+impl Drop for Pbar {
     fn drop(&mut self) {
         if let Err(err) = self.close() {
             eprintln!("{}", err)
@@ -368,7 +382,9 @@ impl<Item, Iter: Iterator<Item = Item>> Drop for Tqdm<Item, Iter> {
     }
 }
 
-/* ---------------------------------- TRAIT --------------------------------- */
+/* -------------------------------------------------------------------------- */
+/*                                    TRAIT                                   */
+/* -------------------------------------------------------------------------- */
 
 /// Trait that allows `.tqdm()` method chaining, equivalent to `tqdm::tqdm(iter)`
 ///
@@ -380,7 +396,7 @@ impl<Item, Iter: Iterator<Item = Item>> Drop for Tqdm<Item, Iter> {
 /// ```
 
 pub trait Iter<Item>: Iterator<Item = Item> {
-    fn tqdm(self) -> Tqdm<Item, Self>
+    fn tqdm(self) -> Tqdm<Self>
     where
         Self: Sized,
     {
@@ -388,7 +404,7 @@ pub trait Iter<Item>: Iterator<Item = Item> {
     }
 }
 
-impl<Item, Iter: Iterator<Item = Item>> crate::Iter<Item> for Iter {}
+impl<Iter: Iterator> crate::Iter<Iter::Item> for Iter {}
 
 /* -------------------------------------------------------------------------- */
 /*                                   PRIVATE                                  */
@@ -396,9 +412,11 @@ impl<Item, Iter: Iterator<Item = Item>> crate::Iter<Item> for Iter {}
 
 /* --------------------------------- STATIC --------------------------------- */
 
-static ID: Lazy<sync::atomic::AtomicUsize> = Lazy::new(|| sync::atomic::AtomicUsize::new(0));
-static BAR: Lazy<sync::Mutex<collections::BTreeMap<usize, Info>>> =
-    Lazy::new(|| sync::Mutex::new(collections::BTreeMap::new()));
+lazy_static! {
+    static ref ID: sync::atomic::AtomicUsize = sync::atomic::AtomicUsize::new(0);
+    static ref BAR: sync::Mutex<collections::BTreeMap<usize, Info>> =
+        sync::Mutex::new(collections::BTreeMap::new());
+}
 
 fn size<T: From<u16>>() -> (T, T) {
     let (width, height) = crossterm::terminal::size().unwrap_or((80, 24));
@@ -436,8 +454,8 @@ struct Info {
     its: Option<f64>,
     total: Option<usize>,
 
-    t0: time::SystemTime,
-    prev: time::SystemTime,
+    t0: SystemTime,
+    prev: SystemTime,
 }
 
 impl Info {

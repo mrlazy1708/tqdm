@@ -17,4 +17,8 @@ categories = ["accessibility", "command-line-utilities"]
 [dependencies]
 anyhow = "1.0"
 crossterm = "0.25"
-once_cell = { version = "1.18.0", default-features = false, features = ["alloc", "parking_lot", "std"] }
+lazy_static = "1.4"
+
+[dev-dependencies]
+futures = { version = "0.3" }
+tokio = { version = "1", features = ["full"] }

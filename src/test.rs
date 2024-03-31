@@ -2,15 +2,23 @@ use crate::*;
 
 #[test]
 
+fn empty() {
+    println!("before");
+    refresh().unwrap();
+    println!("after");
+}
+
+#[test]
+
 fn example() {
-    tqdm(0..100).for_each(|_| thread::sleep(time::Duration::from_secs_f64(0.01)));
+    tqdm(0..100).for_each(|_| thread::sleep(Duration::from_secs_f64(0.01)));
 }
 
 #[test]
 #[ignore]
 
 fn very_slow() {
-    tqdm(0..100).for_each(|_| thread::sleep(time::Duration::from_secs_f64(10.0)));
+    tqdm(0..100).for_each(|_| thread::sleep(Duration::from_secs_f64(10.0)));
 }
 
 #[test]
@@ -18,7 +26,7 @@ fn very_slow() {
 
 fn infinite() {
     for _ in tqdm(0..).desc(Some("infinite")) {
-        thread::sleep(time::Duration::from_secs_f64(0.1));
+        thread::sleep(Duration::from_secs_f64(0.1));
     }
 }
 
@@ -26,7 +34,7 @@ fn infinite() {
 
 fn breaking() {
     for i in tqdm(0..100).desc(Some("breaking")) {
-        thread::sleep(time::Duration::from_secs_f64(0.1));
+        thread::sleep(Duration::from_secs_f64(0.1));
         if i % 10 == 0 {
             println!("break #{}", i);
         }
@@ -54,7 +62,7 @@ fn parallel() {
                 .width(Some(82))
                 .desc(Some(format!("par {}", idx).as_str()))
             {
-                thread::sleep(time::Duration::from_millis(10));
+                thread::sleep(Duration::from_millis(10));
             }
         })
     })
@@ -72,7 +80,7 @@ fn overflow() {
         .map(|idx| {
             thread::spawn(move || {
                 for _i in tqdm(0..100).desc(Some(idx.to_string())) {
-                    thread::sleep(time::Duration::from_millis(10 * idx));
+                    thread::sleep(Duration::from_millis(10 * idx));
                 }
             })
         })
@@ -89,22 +97,26 @@ fn nested() {
     for _ in tqdm(0..3).desc(Some("0")) {
         for _ in tqdm(0..4).desc(Some("1")).clear(true) {
             for _ in tqdm(0..5).desc(Some("2")).clear(true) {
-                thread::sleep(time::Duration::from_millis(30));
+                thread::sleep(Duration::from_millis(30));
             }
         }
     }
 }
 
 /* -------------------------------------------------------------------------- */
-/*                                 CORNER CASE                                */
+/*                                ASYNCHRONOUS                                */
 /* -------------------------------------------------------------------------- */
 
-#[test]
+#[tokio::test]
 
-fn empty() {
-    println!("before");
-    refresh().unwrap();
-    println!("after");
+async fn r#async() {
+    async fn do_something(i: usize) {
+        let duration = Duration::from_secs_f64(i as f64 / 100.0);
+        tokio::time::sleep(duration).await;
+    }
+
+    let futurez = (0..100).map(do_something);
+    futures::future::join_all(tqdm_async(futurez)).await;
 }
 
 /* -------------------------------------------------------------------------- */
@@ -115,20 +127,16 @@ fn empty() {
 
 fn performance() {
     const N: usize = 100000000;
-    fn speed(start: time::SystemTime) -> f64 {
-        N as f64
-            / time::SystemTime::now()
-                .duration_since(start)
-                .unwrap()
-                .as_millis() as f64
-            * 1000.0
+    fn speed(start: SystemTime) -> f64 {
+        let duration = SystemTime::now().duration_since(start).unwrap();
+        N as f64 / duration.as_millis() as f64 * 1000.0
     }
 
-    let start = time::SystemTime::now();
+    let start = SystemTime::now();
     for _i in 0..N {}
     println!("baseline: {:.02}it/s", speed(start));
 
-    let start = time::SystemTime::now();
+    let start = SystemTime::now();
     for _i in tqdm(0..N) {}
     println!("w/ tqdm: {:.02}it/s", speed(start));
 }
