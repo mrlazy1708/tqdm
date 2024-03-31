@@ -21,8 +21,8 @@ extern crate crossterm;
 use crossterm::QueueableCommand;
 use crossterm::{cursor, terminal};
 
-#[macro_use]
-extern crate lazy_static;
+extern crate once_cell;
+use once_cell::sync::Lazy;
 
 #[cfg(test)]
 mod test;
@@ -412,11 +412,9 @@ impl<Iter: Iterator> crate::Iter<Iter::Item> for Iter {}
 
 /* --------------------------------- STATIC --------------------------------- */
 
-lazy_static! {
-    static ref ID: sync::atomic::AtomicUsize = sync::atomic::AtomicUsize::new(0);
-    static ref BAR: sync::Mutex<collections::BTreeMap<usize, Info>> =
-        sync::Mutex::new(collections::BTreeMap::new());
-}
+static ID: sync::atomic::AtomicUsize = sync::atomic::AtomicUsize::new(0);
+static BAR: Lazy<sync::Mutex<collections::BTreeMap<usize, Info>>> =
+    Lazy::new(|| sync::Mutex::new(collections::BTreeMap::new()));
 
 fn size<T: From<u16>>() -> (T, T) {
     let (width, height) = crossterm::terminal::size().unwrap_or((80, 24));
