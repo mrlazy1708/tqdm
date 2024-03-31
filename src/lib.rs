@@ -417,8 +417,17 @@ static BAR: Lazy<sync::Mutex<collections::BTreeMap<usize, Info>>> =
     Lazy::new(|| sync::Mutex::new(collections::BTreeMap::new()));
 
 fn size<T: From<u16>>() -> (T, T) {
-    let (width, height) = crossterm::terminal::size().unwrap_or((80, 24));
+    let (width, height) = terminal::size().unwrap_or((80, 24));
     (T::from(width), T::from(height))
+}
+
+fn ftime(seconds: usize) -> String {
+    let m = seconds / 60 % 60;
+    let s = seconds % 60;
+    match seconds / 3600 {
+        0 => format!("{:02}:{:02}", m, s),
+        h => format!("{:02}:{:02}:{:02}", h, m, s),
+    }
 }
 
 /* --------------------------------- CONFIG --------------------------------- */
@@ -458,24 +467,13 @@ struct Info {
 
 impl Info {
     fn format(&self, t: SystemTime) -> Result<String> {
-        let desc = self
-            .config
-            .desc
-            .clone()
-            .map_or(String::new(), |desc| desc + ": ");
-        let width = self.config.width.unwrap_or_else(|| size().0);
+        let desc = match &self.config.desc {
+            Some(s) => s.to_owned() + ": ",
+            None => String::new(),
+        };
 
         let elapsed = ftime(t.duration_since(self.t0)?.as_secs_f64() as usize);
-
-        /// Time format omitting leading 0
-        fn ftime(seconds: usize) -> String {
-            let m = seconds / 60 % 60;
-            let s = seconds % 60;
-            match seconds / 3600 {
-                0 => format!("{:02}:{:02}", m, s),
-                h => format!("{:02}:{:02}:{:02}", h, m, s),
-            }
-        }
+        let width = self.config.width.unwrap_or_else(|| size().0);
 
         let it = self.it;
         let its = match self.its {
