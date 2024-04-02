@@ -15,6 +15,16 @@ fn example() {
 }
 
 #[test]
+
+fn example_pbar() {
+    let mut pbar = pbar(Some(44850));
+    for i in 0..300 {
+        pbar.update(i).unwrap();
+        thread::sleep(Duration::from_secs_f64(0.01))
+    }
+}
+
+#[test]
 #[ignore]
 
 fn very_slow() {
@@ -59,8 +69,8 @@ fn parallel() {
         thread::spawn(move || {
             for _i in tqdm(0..its)
                 .style(style)
-                .width(Some(82))
-                .desc(Some(format!("par {}", idx).as_str()))
+                .width(Some(80))
+                .desc(Some(format!("bar {}", idx).as_str()))
             {
                 thread::sleep(Duration::from_millis(10));
             }
@@ -109,13 +119,9 @@ fn nested() {
 
 #[tokio::test]
 
-async fn r#async() {
-    async fn do_something(i: usize) {
-        let duration = Duration::from_secs_f64(i as f64 / 100.0);
-        tokio::time::sleep(duration).await;
-    }
-
-    let futurez = (0..100).map(do_something);
+async fn main() {
+    use tokio::time::{sleep, Duration};
+    let futurez = (0..100).map(|i| sleep(Duration::from_secs_f64(i as f64 / 100.0)));
     futures::future::join_all(tqdm_async(futurez)).await;
 }
 

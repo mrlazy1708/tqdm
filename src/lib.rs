@@ -1,12 +1,10 @@
-//! Rust implementation of Python command line progress bar tool [tqdm](https://github.com/tqdm/tqdm/).
+//! Rust implementation of the popular Python command line progress bar tool tqdm.
 //!
-//! From original documentation:
-//! > tqdm derives from the Arabic word taqaddum (تقدّم) which can mean "progress," and is an abbreviation for "I love you so much" in Spanish (te quiero demasiado).
-//! > Instantly make your loops show a smart progress meter - just wrap any iterable with tqdm(iterable), and you're done!
-//!
-//! This crate provides a wrapper [Iterator]. It controls multiple progress bars when `next` is called.
-//! Most traits are bypassed with [auto-dereference](https://doc.rust-lang.org/std/ops/trait.Deref.html), so original methods can be called with no overhead.
-//!
+//! > The name "tqdm" derives from the Arabic word taqaddum (تقدّم) which can mean
+//! > "progress", and is an abbreviation for "I love you so much" in Spanish
+//! > (te quiero demasiado). Instantly make your loops show a smart progress
+//! > meter - just wrap any iterable with tqdm(iterable), and you're done!
+//! 
 
 use std::*;
 
@@ -30,10 +28,10 @@ mod test;
 pub mod style;
 pub use style::Style;
 
-pub mod r#async;
-pub use r#async::tqdm_async;
+pub mod lib_async;
+pub use lib_async::tqdm_async;
 
-/// Manually refresh all tqdms
+/// Manually refresh all bars.
 
 pub fn refresh() -> Result<()> {
     let mut out = io::stderr();
@@ -128,7 +126,7 @@ pub struct Tqdm<Iter> {
 }
 
 impl<Iter> Tqdm<Iter> {
-    /// Configure progress bar's name
+    /// Configure progress bar's name.
     ///
     /// * `desc` - bar description
     ///     - `Some(S)`: Named progress bar
@@ -151,7 +149,7 @@ impl<Iter> Tqdm<Iter> {
         self
     }
 
-    /// Configure progress bar's width
+    /// Configure progress bar's width.
     ///
     /// * `width` - width limitation
     ///     - `Some(usize)`: Fixed width regardless of terminal size
@@ -174,7 +172,7 @@ impl<Iter> Tqdm<Iter> {
         self
     }
 
-    /// Configure progress bar's style
+    /// Configure progress bar's style.
     ///
     /// * `style` - `enum` of the style
     ///
@@ -195,7 +193,7 @@ impl<Iter> Tqdm<Iter> {
         self
     }
 
-    /// Exponential smoothing factor
+    /// Exponential smoothing factor.
     ///
     /// * `smoothing` - weight for the current update
     ///
@@ -216,7 +214,7 @@ impl<Iter> Tqdm<Iter> {
         self
     }
 
-    /// Behavior of after termination
+    /// Behavior of after termination.
     ///
     /// * `clear` - true: remove this bar as if never created
     ///           - false: leave completed bar at the very top
@@ -244,7 +242,7 @@ impl<Iter: Iterator> Iterator for Tqdm<Iter> {
 
     fn next(&mut self) -> Option<Self::Item> {
         if let Some(next) = self.iter.next() {
-            if let Err(err) = self.update(1) {
+            if let Err(err) = self.pbar.update(1) {
                 eprintln!("{}", err);
             }
             Some(next)
@@ -259,22 +257,36 @@ impl<Iter: Iterator> Iterator for Tqdm<Iter> {
 }
 
 impl<Iter: Iterator> Deref for Tqdm<Iter> {
-    type Target = Pbar;
+    type Target = Iter;
 
     fn deref(&self) -> &Self::Target {
-        &self.pbar
+        &self.iter
     }
 }
 
 impl<Iter: Iterator> DerefMut for Tqdm<Iter> {
     fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.pbar
+        &mut self.iter
     }
 }
 
 /* -------------------------------------------------------------------------- */
 /*                                    PBAR                                    */
 /* -------------------------------------------------------------------------- */
+
+/// Manually create a progress bar.
+/// 
+/// 
+/// ## Examples
+/// ```
+/// use tqdm::pbar;
+/// let mut pbar = pbar(Some(44850));
+/// 
+/// for i in 0..300 {
+///     pbar.update(i).unwrap();
+///     /* Your loop logic here */
+/// }
+/// ```
 
 pub fn pbar(total: Option<usize>) -> Pbar {
     let id = ID.fetch_add(1, sync::atomic::Ordering::SeqCst);
@@ -325,7 +337,7 @@ pub struct Pbar {
 }
 
 impl Pbar {
-    /// Manually update the progress bar
+    /// Manually update the progress bar.
 
     pub fn update(&mut self, n: usize) -> Result<()> {
         self.step += n;
@@ -339,15 +351,16 @@ impl Pbar {
                         self.step = 0;
                     }
                 }
+                refresh()?;
 
                 self.next = now + self.mininterval;
             }
         }
 
-        refresh()
+        Ok(())
     }
 
-    /// Manually close the bar and unregister it
+    /// Manually close the bar and unregister it.
 
     pub fn close(&mut self) -> Result<()> {
         let time = SystemTime::now();
@@ -386,7 +399,7 @@ impl Drop for Pbar {
 /*                                    TRAIT                                   */
 /* -------------------------------------------------------------------------- */
 
-/// Trait that allows `.tqdm()` method chaining, equivalent to `tqdm::tqdm(iter)`
+/// Trait that allows calling `.tqdm()`, equivalent to `tqdm::tqdm(iter)`.
 ///
 ///
 /// ## Examples
