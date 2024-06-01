@@ -10,6 +10,7 @@ pub enum Style {
     ASCII,
     Block,
     Balloon,
+    Custom(String)
 }
 
 impl Default for Style {
@@ -24,6 +25,7 @@ impl ToString for Style {
             Style::ASCII => "0123456789#",
             Style::Block => " ▏▎▍▌▋▊▉█",
             Style::Balloon => ".oO@*",
+            Style::Custom(n) => &n[..],
         })
     }
 }
