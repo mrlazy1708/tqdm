@@ -507,16 +507,32 @@ impl Info {
                 let bra_ = format!("{}{:>3}%|", desc, (100.0 * pct) as usize);
                 let _ket = format!("| {}/{} [{}<{}, {}it/s]", it, total, elapsed, eta, its);
                 let tqdm = {
-                    let limit = width.saturating_sub(bra_.len() + _ket.len());
-                    let pattern: Vec<_> = self.config.style.to_string().chars().collect();
+                    if let Style::Pacman = self.config.style {
+                        let limit = (width.saturating_sub(bra_.len() + _ket.len()) / 3) * 3 - 6;
+                        let pattern: Vec<_> = self.config.style.to_string().chars().collect();
 
-                    let m = pattern.len();
-                    let n = ((limit as f64 * pct) * m as f64) as usize;
+                        let m = pattern.len();
+                        let n = ((limit as f64 * pct) * m as f64) as usize;
 
-                    let bar = pattern.last().unwrap().to_string().repeat(n / m);
-                    match n / m {
-                        x if x == limit => bar,
-                        _ => format!("{:<limit$}", format!("{}{}", bar, pattern[n % m])),
+                        let bar = pattern.last().unwrap().to_string().repeat(n / m);
+                        let empty = " o ".repeat(limit / 3 + 2)[bar.len() + 1..].to_string();
+
+                        match n / m {
+                            x if x == limit => bar,
+                            _ => format!("{}{}", format!("{}{}", bar, pattern[0]), empty),
+                        }
+                    } else {
+                        let limit = width.saturating_sub(bra_.len() + _ket.len());
+                        let pattern: Vec<_> = self.config.style.to_string().chars().collect();
+
+                        let m = pattern.len();
+                        let n = ((limit as f64 * pct) * m as f64) as usize;
+
+                        let bar = pattern.last().unwrap().to_string().repeat(n / m);
+                        match n / m {
+                            x if x == limit => bar,
+                            _ => format!("{:<limit$}", format!("{}{}", bar, pattern[n % m])),
+                        }
                     }
                 };
 
