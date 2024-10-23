@@ -8,12 +8,14 @@
 //!
 //! Other styles are open for [contribution](https://github.com/mrlazy1708/tqdm/issues/1).
 
+use std::fmt::Display;
+
 pub enum Style {
     ASCII,
     Block,
     Balloon,
     Pacman,
-    Custom(String)
+    Custom(String),
 }
 
 impl Default for Style {
@@ -22,14 +24,15 @@ impl Default for Style {
     }
 }
 
-impl ToString for Style {
-    fn to_string(&self) -> String {
-        String::from(match self {
+impl Display for Style {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let str = String::from(match self {
             Style::ASCII => "0123456789#",
             Style::Block => " ▏▎▍▌▋▊▉█",
             Style::Balloon => ".oO@*",
             Style::Pacman => "C-",
             Style::Custom(n) => &n[..],
-        })
+        });
+        write!(f, "{}", str)
     }
 }

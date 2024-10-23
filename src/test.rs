@@ -51,6 +51,22 @@ fn breaking() {
     }
 }
 
+#[test]
+fn given_total_length() {
+    // Should show a total at first, then switch to no pbar
+    for _ in tqdm_total(0..10, 5) {
+        thread::sleep(Duration::from_millis(250));
+    }
+    // Fills up as far as the iterator goes, then stops
+    for _ in tqdm_total(0..10, 20) {
+        thread::sleep(Duration::from_millis(250));
+    }
+    // Shows no pbar at all
+    for _ in tqdm_total(0..10, 0) {
+        thread::sleep(Duration::from_millis(250));
+    }
+}
+
 /* -------------------------------------------------------------------------- */
 /*                                  MULTI-BAR                                 */
 /* -------------------------------------------------------------------------- */

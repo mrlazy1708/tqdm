@@ -4,7 +4,7 @@
 //! > "progress", and is an abbreviation for "I love you so much" in Spanish
 //! > (te quiero demasiado). Instantly make your loops show a smart progress
 //! > meter - just wrap any iterable with tqdm(iterable), and you're done!
-//! 
+//!
 
 use std::*;
 
@@ -74,13 +74,30 @@ pub fn refresh() -> Result<()> {
 /*                                    TQDM                                    */
 /* -------------------------------------------------------------------------- */
 
-/// Wrap [Iterator] like it in Python. This function creates a default progress
-/// bar object and registers it to the global collection. The returned iterator
-/// [Deref] to the given one and will update its tqdm whenever `next` is called.
+/// Wraps an [Iterator] as in Python. This function creates a default progress
+/// bar object and registers it to the global collection. The iterator returns a
+/// [Deref] to the initially provided Iterator and will update its tqdm whenever
+/// `next` is called.
 
 pub fn tqdm<Iter: IntoIterator>(iterable: Iter) -> Tqdm<Iter::IntoIter> {
     let iter = iterable.into_iter();
     let pbar = pbar(iter.size_hint().1);
+
+    Tqdm { iter, pbar }
+}
+
+/// Wraps an [Iterator] as in the base tqdm() function, but takes an additional 'total' parameter.
+/// The 'total' parameter will set the progress bar length. Should the total be smaller
+/// than the current number of iterations, the progress bar will disappear an only the number
+/// of iterations and current iteration time will be shown. As with the base function, a [Deref] to
+/// the intial iterator is returned.
+pub fn tqdm_total<Iter: IntoIterator>(iterable: Iter, total: u128) -> Tqdm<Iter::IntoIter> {
+    let iter = iterable.into_iter();
+    let pbar = pbar(if total > 0 {
+        Some(total as usize)
+    } else {
+        None
+    });
 
     Tqdm { iter, pbar }
 }
@@ -275,13 +292,13 @@ impl<Iter: Iterator> DerefMut for Tqdm<Iter> {
 /* -------------------------------------------------------------------------- */
 
 /// Manually create a progress bar.
-/// 
-/// 
+///
+///
 /// ## Examples
 /// ```
 /// use tqdm::pbar;
 /// let mut pbar = pbar(Some(44850));
-/// 
+///
 /// for i in 0..300 {
 ///     pbar.update(i).unwrap();
 ///     /* Your loop logic here */
@@ -448,7 +465,7 @@ fn ftime(seconds: usize) -> String {
 struct Config {
     desc: Option<String>,
     width: Option<usize>,
-    style: style::Style,
+    style: Style,
     smoothing: f64,
     clear: bool,
 }
@@ -545,6 +562,11 @@ impl Info {
         if self.prev != time::UNIX_EPOCH {
             let dt = t.duration_since(self.prev).unwrap();
             let its = n as f64 / dt.as_secs_f64();
+            // Should the user set a total below the length of the iterator, set total to None
+            // to disable printing a progress bar in formatting
+            if self.total.is_some_and(|tot| tot <= self.it) {
+                self.total = None;
+            }
 
             self.its = match self.its {
                 None => Some(its),
