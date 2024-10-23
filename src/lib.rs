@@ -75,7 +75,7 @@ pub fn refresh() -> Result<()> {
 /* -------------------------------------------------------------------------- */
 
 /// Wraps an [Iterator] as in Python. This function creates a default progress
-/// bar object and registers it to the global collection. The iterator returns a
+/// bar object and registers it to the global collection. The function returns a
 /// [Deref] to the initially provided Iterator and will update its tqdm whenever
 /// `next` is called.
 
@@ -88,9 +88,9 @@ pub fn tqdm<Iter: IntoIterator>(iterable: Iter) -> Tqdm<Iter::IntoIter> {
 
 /// Wraps an [Iterator] as in the base tqdm() function, but takes an additional 'total' parameter.
 /// The 'total' parameter will set the progress bar length. Should the total be smaller
-/// than the current number of iterations, the progress bar will disappear an only the number
+/// than the current number of iterations, the progress bar will disappear and only the number
 /// of iterations and current iteration time will be shown. As with the base function, a [Deref] to
-/// the intial iterator is returned.
+/// the initial iterator is returned.
 pub fn tqdm_total<Iter: IntoIterator>(iterable: Iter, total: u128) -> Tqdm<Iter::IntoIter> {
     let iter = iterable.into_iter();
     let pbar = pbar(if total > 0 {
