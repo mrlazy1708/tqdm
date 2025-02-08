@@ -149,6 +149,31 @@ impl<Iter> Tqdm<Iter> {
         self
     }
 
+    /// Update the progress bar's description dynamically.
+    ///
+    /// * desc - bar description
+    ///     - Some(S): Named progress bar
+    ///     - None: Anonymous
+    ///
+    /// ## Examples
+    ///
+    /// ```rust
+    /// let mut pbar = tqdm(0..100);
+    /// for i in 0..100 {
+    ///     thread::sleep(Duration::from_secs_f64(0.1));
+    ///     pbar.pbar.update(1).unwrap();
+    ///     pbar.set_desc(Some(format!("Processing {}", i))); 
+    /// }
+    /// ```
+    pub fn set_desc<S: ToString>(&mut self, desc: Option<S>) {
+        if let Ok(mut tqdm) = BAR.lock() {
+            let info = tqdm.get_mut(&self.pbar.id);
+            if let Some(info) = info {
+                info.config.desc = desc.map(|desc| desc.to_string());
+            }
+        }
+    }
+
     /// Configure progress bar's width.
     ///
     /// * `width` - width limitation
@@ -559,3 +584,4 @@ impl Info {
         self.it += n;
     }
 }
+
