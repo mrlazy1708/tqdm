@@ -51,6 +51,17 @@ fn breaking() {
     }
 }
 
+#[test]
+
+fn dynamic_setting_desc() {
+    let mut pbar = tqdm(0..100);
+    for i in 0..100 {
+        thread::sleep(Duration::from_secs_f64(0.1));
+        pbar.pbar.update(1).unwrap();
+        pbar.set_desc(Some(format!("Processing {}", i))); 
+    }
+}
+
 /* -------------------------------------------------------------------------- */
 /*                                  MULTI-BAR                                 */
 /* -------------------------------------------------------------------------- */
