@@ -4,7 +4,7 @@
 //! > "progress", and is an abbreviation for "I love you so much" in Spanish
 //! > (te quiero demasiado). Instantly make your loops show a smart progress
 //! > meter - just wrap any iterable with tqdm(iterable), and you're done!
-//! 
+//!
 
 use std::*;
 
@@ -275,13 +275,13 @@ impl<Iter: Iterator> DerefMut for Tqdm<Iter> {
 /* -------------------------------------------------------------------------- */
 
 /// Manually create a progress bar.
-/// 
-/// 
+///
+///
 /// ## Examples
 /// ```
 /// use tqdm::pbar;
 /// let mut pbar = pbar(Some(44850));
-/// 
+///
 /// for i in 0..300 {
 ///     pbar.update(i).unwrap();
 ///     /* Your loop logic here */
