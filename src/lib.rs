@@ -360,6 +360,26 @@ impl Pbar {
         Ok(())
     }
 
+    /// Behavior of after termination.
+    ///
+    /// * `clear` - true: remove this bar as if never created
+    ///           - false: leave completed bar at the very top
+    ///
+    ///
+    /// ## Examples
+    /// ```
+    /// let pbar = pbar(Some(100)).clear(true)
+    /// ```
+
+    pub fn clear(self, clear: bool) -> Self {
+        if let Ok(mut tqdm) = BAR.lock() {
+            if let Some(info) = tqdm.get_mut(&self.id) {
+                info.config.clear = clear;
+            }
+        }
+        self
+    }
+
     /// Manually close the bar and unregister it.
 
     pub fn close(&mut self) -> Result<()> {
