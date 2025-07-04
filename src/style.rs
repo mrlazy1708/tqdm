@@ -22,9 +22,9 @@ impl Default for Style {
     }
 }
 
-impl ToString for Style {
-    fn to_string(&self) -> String {
-        String::from(match self {
+impl std::fmt::Display for Style {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", match self {
             Style::ASCII => "0123456789#",
             Style::Block => " ▏▎▍▌▋▊▉█",
             Style::Balloon => ".oO@*",

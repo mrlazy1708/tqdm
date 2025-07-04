@@ -16,7 +16,7 @@ where
             let output = item.await;
             if let Ok(mut pbar) = pbar.lock() {
                 if let Err(err) = pbar.update(1) {
-                    eprintln!("{}", err);
+                    eprintln!("{err}");
                 }
             }
             output

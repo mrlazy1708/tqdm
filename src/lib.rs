@@ -32,7 +32,6 @@ pub mod lib_async;
 pub use lib_async::tqdm_async;
 
 /// Manually refresh all bars.
-
 pub fn refresh() -> Result<()> {
     let mut out = io::stderr();
 
@@ -74,7 +73,7 @@ pub fn refresh() -> Result<()> {
 /*                                    TQDM                                    */
 /* -------------------------------------------------------------------------- */
 
-fn create<T>(total: Option<usize>, iter: T) -> Tqdm<T> {
+fn create<T>(n: Option<usize>, iter: T) -> Tqdm<T> {
     let id = ID.fetch_add(1, sync::atomic::Ordering::SeqCst);
     if let Ok(mut tqdm) = BAR.lock() {
         tqdm.insert(
@@ -84,7 +83,7 @@ fn create<T>(total: Option<usize>, iter: T) -> Tqdm<T> {
 
                 it: 0,
                 its: None,
-                total: total,
+                total: n,
 
                 t0: SystemTime::now(),
                 prev: time::UNIX_EPOCH,
@@ -93,7 +92,7 @@ fn create<T>(total: Option<usize>, iter: T) -> Tqdm<T> {
     }
 
     if let Err(err) = refresh() {
-        eprintln!("{}", err)
+        eprintln!("{err}")
     }
 
     Tqdm {
@@ -197,13 +196,12 @@ pub struct Tqdm<T> {
     miniters: usize,
 }
 
-/// Builders
-
+/// Builder patterns
 impl<T> Tqdm<T> {
 
     /// Configure progress bar's name.
     ///
-    /// * `desc` - bar description
+    /// * `desc` bar description
     ///     - `Some(S)`: Named progress bar
     ///     - `None`: Anonymous
     ///
@@ -212,14 +210,14 @@ impl<T> Tqdm<T> {
     /// ```
     /// tqdm(0..100).desc(Some("Bar1"))
     /// ```
-
+    /// 
     pub fn desc<S: ToString>(self, desc: Option<S>) -> Self {
         self.set_desc(desc); self
     }
 
         /// Configure progress bar's total.
     ///
-    /// * `total` - total number of items
+    /// * `total` total number of items
     ///     - `Some(n)`: Known length
     ///     - `None`: Unknown length
     ///
@@ -228,8 +226,7 @@ impl<T> Tqdm<T> {
     /// ```
     /// tqdm(0..100).total(Some(50))
     /// ```
-
-
+    /// 
     pub fn total(self, total: Option<usize>) -> Self {
         if let Ok(mut tqdm) = BAR.lock() {
             let info = tqdm.get_mut(&self.id);
@@ -243,7 +240,7 @@ impl<T> Tqdm<T> {
 
     /// Configure progress bar's width.
     ///
-    /// * `width` - width limitation
+    /// * `width` width limitation
     ///     - `Some(usize)`: Fixed width regardless of terminal size
     ///     - `None`: Expand to formatter limit or full terminal width
     ///
@@ -252,7 +249,7 @@ impl<T> Tqdm<T> {
     /// ```
     /// tqdm(0..100).width(Some(100))
     /// ```
-
+    /// 
     pub fn width(self, width: Option<usize>) -> Self {
         if let Ok(mut tqdm) = BAR.lock() {
             let info = tqdm.get_mut(&self.id);
@@ -266,14 +263,14 @@ impl<T> Tqdm<T> {
 
     /// Configure progress bar's style.
     ///
-    /// * `style` - `enum` of the style
+    /// * `style` bar style enum
     ///
     ///
     /// ## Examples
     /// ```
     /// tqdm(0..100).style(tqdm::Style::Balloon)
     /// ```
-
+    /// 
     pub fn style(self, style: Style) -> Self {
         if let Ok(mut tqdm) = BAR.lock() {
             let info = tqdm.get_mut(&self.id);
@@ -287,14 +284,14 @@ impl<T> Tqdm<T> {
 
     /// Exponential smoothing factor.
     ///
-    /// * `smoothing` - weight for the current update
+    /// * `smoothing` weight for the current update
     ///
     ///
     /// ## Examples
     /// ```
     /// tqdm(0..100).smoothing(0.9999)
     /// ```
-
+    /// 
     pub fn smoothing(self, smoothing: f64) -> Self {
         if let Ok(mut tqdm) = BAR.lock() {
             let info = tqdm.get_mut(&self.id);
@@ -308,15 +305,16 @@ impl<T> Tqdm<T> {
 
     /// Behavior of after termination.
     ///
-    /// * `clear` - true: remove this bar as if never created
-    ///           - false: leave completed bar at the very top
+    /// * `clear` termination behavior
+    ///     - true: remove this bar as if never created
+    ///     - false: leave completed bar at the very top
     ///
     ///
     /// ## Examples
     /// ```
     /// tqdm(0..100).clear(true)
     /// ```
-
+    /// 
     pub fn clear(self, clear: bool) -> Self {
         if let Ok(mut tqdm) = BAR.lock() {
             let info = tqdm.get_mut(&self.id);
@@ -329,12 +327,9 @@ impl<T> Tqdm<T> {
     }
 }
 
-/// Dynamics
-
 impl<T> Tqdm<T> {
 
     /// Manually update the progress bar.
-
     pub fn update(&mut self, n: usize) -> Result<()> {
         self.step += n;
 
@@ -357,7 +352,6 @@ impl<T> Tqdm<T> {
     }
 
     /// Set description of a progress bar.
-
     pub fn set_desc<S: ToString>(&self, desc: Option<S>) {
         if let Ok(mut tqdm) = BAR.lock() {
             let info = tqdm.get_mut(&self.id);
@@ -368,7 +362,6 @@ impl<T> Tqdm<T> {
     }
 
     /// Manually close the bar and unregister it.
-
     pub fn close(&mut self) -> Result<()> {
         let time = SystemTime::now();
         let mut out = io::stderr();
@@ -400,7 +393,7 @@ impl<Iter: Iterator> Iterator for Tqdm<Iter> {
     fn next(&mut self) -> Option<Self::Item> {
         if let Some(next) = self.iter.next() {
             if let Err(err) = self.update(1) {
-                eprintln!("{}", err);
+                eprintln!("{err}");
             }
             Some(next)
         } else {
@@ -430,7 +423,7 @@ impl<Iter: Iterator> DerefMut for Tqdm<Iter> {
 impl<T> Drop for Tqdm<T> {
     fn drop(&mut self) {
         if let Err(err) = self.close() {
-            eprintln!("{}", err)
+            eprintln!("{err}")
         }
     }
 }
@@ -447,7 +440,7 @@ impl<T> Drop for Tqdm<T> {
 /// use tqdm::Iter;
 /// (0..).take(1000).tqdm()
 /// ```
-
+/// 
 pub trait Iter<Item>: Iterator<Item = Item> {
     fn tqdm(self) -> Tqdm<Self>
     where
@@ -478,8 +471,8 @@ fn ftime(seconds: usize) -> String {
     let m = seconds / 60 % 60;
     let s = seconds % 60;
     match seconds / 3600 {
-        0 => format!("{:02}:{:02}", m, s),
-        h => format!("{:02}:{:02}:{:02}", h, m, s),
+        0 => format!("{m:02}:{s:02}"),
+        h => format!("{h:02}:{m:02}:{s:02}"),
     }
 }
 
@@ -531,18 +524,11 @@ impl Info {
         let it = self.it;
         let its = match self.its {
             None => String::from("?"),
-            Some(its) => format!("{:.02}", its),
+            Some(its) => format!("{its:.02}"),
         };
 
-        let total = match self.total {
-            None => None,
-            Some(total) => {
-                if total >= it { Some(total) } else { None }
-            },
-        };
-
-        Ok(match total {
-            None => format_args!("{}{}it [{}, {}it/s]", desc, it, elapsed, its).to_string(),
+        Ok(match self.total.filter(|&total| total >= it) {
+            None => format_args!("{desc}{it}it [{elapsed}, {its}it/s]").to_string(),
 
             Some(total) => {
                 let pct = (it as f64 / total as f64).clamp(0.0, 1.0);
@@ -551,8 +537,8 @@ impl Info {
                     Some(its) => ftime(((total - it) as f64 / its) as usize),
                 };
 
-                let bra_ = format!("{}{:>3}%|", desc, (100.0 * pct) as usize);
-                let _ket = format!("| {}/{} [{}<{}, {}it/s]", it, total, elapsed, eta, its);
+                let bra_ = format!("{desc}{:>3}%|", (100.0 * pct) as usize);
+                let _ket = format!("| {it}/{total} [{elapsed}<{eta}, {its}it/s]");
                 let tqdm = {
                     if let Style::Pacman = self.config.style {
                         let limit = (width.saturating_sub(bra_.len() + _ket.len()) / 3) * 3 - 6;
@@ -566,7 +552,7 @@ impl Info {
 
                         match n / m {
                             x if x == limit => bar,
-                            _ => format!("{}{}", format!("{}{}", bar, pattern[0]), empty),
+                            _ => format!("{bar}{}{empty}", pattern[0]),
                         }
                     } else {
                         let limit = width.saturating_sub(bra_.len() + _ket.len());
@@ -583,7 +569,7 @@ impl Info {
                     }
                 };
 
-                format_args!("{}{}{}", bra_, tqdm, _ket).to_string()
+                format_args!("{bra_}{tqdm}{_ket}").to_string()
             }
         })
     }
