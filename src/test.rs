@@ -51,6 +51,25 @@ fn breaking() {
     }
 }
 
+#[test]
+
+ fn dynamic_setting_desc() {
+     let mut pbar = tqdm(0..100);
+     for i in 0..100 {
+         thread::sleep(Duration::from_secs_f64(0.1));
+         pbar.update(1).unwrap();
+         pbar.set_desc(Some(format!("Processing {}", i))); 
+     }
+ }
+
+#[test]
+
+ fn shorter_total() {
+     for _ in tqdm(0..100).total(Some(50)) {
+         thread::sleep(Duration::from_secs_f64(0.1));
+     }
+ }
+
 /* -------------------------------------------------------------------------- */
 /*                                  MULTI-BAR                                 */
 /* -------------------------------------------------------------------------- */

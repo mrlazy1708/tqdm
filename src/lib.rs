@@ -74,15 +74,76 @@ pub fn refresh() -> Result<()> {
 /*                                    TQDM                                    */
 /* -------------------------------------------------------------------------- */
 
-/// Wrap [Iterator] like it in Python. This function creates a default progress
-/// bar object and registers it to the global collection. The returned iterator
-/// [Deref] to the given one and will update its tqdm whenever `next` is called.
+fn create<T>(total: Option<usize>, iter: T) -> Tqdm<T> {
+    let id = ID.fetch_add(1, sync::atomic::Ordering::SeqCst);
+    if let Ok(mut tqdm) = BAR.lock() {
+        tqdm.insert(
+            id,
+            Info {
+                config: Config::default(),
 
+                it: 0,
+                its: None,
+                total: total,
+
+                t0: SystemTime::now(),
+                prev: time::UNIX_EPOCH,
+            },
+        );
+    }
+
+    if let Err(err) = refresh() {
+        eprintln!("{}", err)
+    }
+
+    Tqdm {
+        iter,
+        id,
+
+        next: time::UNIX_EPOCH,
+        step: 0,
+
+        mininterval: Duration::from_secs_f64(1. / 24.),
+        miniters: 1,
+    }
+}
+
+/// Create a progress bar from an iterable.
+///
+/// This function creates a default progress bar object and registers it
+/// to the global collection. The returned iterator [Deref] to the given
+/// one and will update its tqdm whenever `next` is called.
+/// 
+/// ## Examples
+/// ```
+/// use tqdm::tqdm;
+/// 
+/// for i in tqdm(0..100) {
+///     /* Your loop logic here */
+/// }
+/// ```
+/// 
 pub fn tqdm<Iter: IntoIterator>(iterable: Iter) -> Tqdm<Iter::IntoIter> {
     let iter = iterable.into_iter();
-    let pbar = pbar(iter.size_hint().1);
+    create(iter.size_hint().1, iter)
+}
 
-    Tqdm { iter, pbar }
+/// Manually create a progress bar.
+/// 
+/// 
+/// ## Examples
+/// ```
+/// use tqdm::pbar;
+/// let mut pbar = pbar(Some(44850));
+/// 
+/// for i in 0..300 {
+///     pbar.update(i).unwrap();
+///     /* Your loop logic here */
+/// }
+/// ```
+/// 
+pub fn pbar(total: Option<usize>) -> Tqdm<()> {
+    create(total, ())
 }
 
 /// Iterator wrapper that updates progress bar on `next`
@@ -119,13 +180,27 @@ pub fn tqdm<Iter: IntoIterator>(iterable: Iter) -> Tqdm<Iter::IntoIter> {
 ///     handle.join().unwrap();
 /// }
 /// ```
+pub struct Tqdm<T> {
+    pub iter: T,
 
-pub struct Tqdm<Iter> {
-    pub iter: Iter,
-    pub pbar: Pbar,
+    /// Hash
+    id: usize,
+
+    /// Next refresh time
+    next: SystemTime,
+
+    /// Cached
+    step: usize,
+
+    /// Refresh limit
+    mininterval: Duration,
+    miniters: usize,
 }
 
-impl<Iter> Tqdm<Iter> {
+/// Builders
+
+impl<T> Tqdm<T> {
+
     /// Configure progress bar's name.
     ///
     /// * `desc` - bar description
@@ -139,10 +214,27 @@ impl<Iter> Tqdm<Iter> {
     /// ```
 
     pub fn desc<S: ToString>(self, desc: Option<S>) -> Self {
+        self.set_desc(desc); self
+    }
+
+        /// Configure progress bar's total.
+    ///
+    /// * `total` - total number of items
+    ///     - `Some(n)`: Known length
+    ///     - `None`: Unknown length
+    ///
+    ///
+    /// ## Examples
+    /// ```
+    /// tqdm(0..100).total(Some(50))
+    /// ```
+
+
+    pub fn total(self, total: Option<usize>) -> Self {
         if let Ok(mut tqdm) = BAR.lock() {
-            let info = tqdm.get_mut(&self.pbar.id);
+            let info = tqdm.get_mut(&self.id);
             if let Some(info) = info {
-                info.config.desc = desc.map(|desc| desc.to_string());
+                info.total = total;
             }
         }
 
@@ -163,7 +255,7 @@ impl<Iter> Tqdm<Iter> {
 
     pub fn width(self, width: Option<usize>) -> Self {
         if let Ok(mut tqdm) = BAR.lock() {
-            let info = tqdm.get_mut(&self.pbar.id);
+            let info = tqdm.get_mut(&self.id);
             if let Some(info) = info {
                 info.config.width = width;
             }
@@ -184,7 +276,7 @@ impl<Iter> Tqdm<Iter> {
 
     pub fn style(self, style: Style) -> Self {
         if let Ok(mut tqdm) = BAR.lock() {
-            let info = tqdm.get_mut(&self.pbar.id);
+            let info = tqdm.get_mut(&self.id);
             if let Some(info) = info {
                 info.config.style = style;
             }
@@ -205,7 +297,7 @@ impl<Iter> Tqdm<Iter> {
 
     pub fn smoothing(self, smoothing: f64) -> Self {
         if let Ok(mut tqdm) = BAR.lock() {
-            let info = tqdm.get_mut(&self.pbar.id);
+            let info = tqdm.get_mut(&self.id);
             if let Some(info) = info {
                 info.config.smoothing = smoothing;
             }
@@ -227,7 +319,7 @@ impl<Iter> Tqdm<Iter> {
 
     pub fn clear(self, clear: bool) -> Self {
         if let Ok(mut tqdm) = BAR.lock() {
-            let info = tqdm.get_mut(&self.pbar.id);
+            let info = tqdm.get_mut(&self.id);
             if let Some(info) = info {
                 info.config.clear = clear;
             }
@@ -237,106 +329,10 @@ impl<Iter> Tqdm<Iter> {
     }
 }
 
-impl<Iter: Iterator> Iterator for Tqdm<Iter> {
-    type Item = Iter::Item;
+/// Dynamics
 
-    fn next(&mut self) -> Option<Self::Item> {
-        if let Some(next) = self.iter.next() {
-            if let Err(err) = self.pbar.update(1) {
-                eprintln!("{}", err);
-            }
-            Some(next)
-        } else {
-            None
-        }
-    }
+impl<T> Tqdm<T> {
 
-    fn size_hint(&self) -> (usize, Option<usize>) {
-        self.iter.size_hint()
-    }
-}
-
-impl<Iter: Iterator> Deref for Tqdm<Iter> {
-    type Target = Iter;
-
-    fn deref(&self) -> &Self::Target {
-        &self.iter
-    }
-}
-
-impl<Iter: Iterator> DerefMut for Tqdm<Iter> {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.iter
-    }
-}
-
-/* -------------------------------------------------------------------------- */
-/*                                    PBAR                                    */
-/* -------------------------------------------------------------------------- */
-
-/// Manually create a progress bar.
-/// 
-/// 
-/// ## Examples
-/// ```
-/// use tqdm::pbar;
-/// let mut pbar = pbar(Some(44850));
-/// 
-/// for i in 0..300 {
-///     pbar.update(i).unwrap();
-///     /* Your loop logic here */
-/// }
-/// ```
-
-pub fn pbar(total: Option<usize>) -> Pbar {
-    let id = ID.fetch_add(1, sync::atomic::Ordering::SeqCst);
-    if let Ok(mut tqdm) = BAR.lock() {
-        tqdm.insert(
-            id,
-            Info {
-                config: Config::default(),
-
-                it: 0,
-                its: None,
-                total,
-
-                t0: SystemTime::now(),
-                prev: time::UNIX_EPOCH,
-            },
-        );
-    }
-
-    if let Err(err) = refresh() {
-        eprintln!("{}", err)
-    }
-
-    Pbar {
-        id,
-
-        next: time::UNIX_EPOCH,
-        step: 0,
-
-        mininterval: Duration::from_secs_f64(1. / 24.),
-        miniters: 1,
-    }
-}
-
-pub struct Pbar {
-    /// Hash
-    id: usize,
-
-    /// Next refresh time
-    next: SystemTime,
-
-    /// Cached
-    step: usize,
-
-    /// Refresh limit
-    mininterval: Duration,
-    miniters: usize,
-}
-
-impl Pbar {
     /// Manually update the progress bar.
 
     pub fn update(&mut self, n: usize) -> Result<()> {
@@ -358,6 +354,17 @@ impl Pbar {
         }
 
         Ok(())
+    }
+
+    /// Set description of a progress bar.
+
+    pub fn set_desc<S: ToString>(&self, desc: Option<S>) {
+        if let Ok(mut tqdm) = BAR.lock() {
+            let info = tqdm.get_mut(&self.id);
+            if let Some(info) = info {
+                info.config.desc = desc.map(|desc| desc.to_string());
+            }
+        }
     }
 
     /// Manually close the bar and unregister it.
@@ -387,7 +394,40 @@ impl Pbar {
     }
 }
 
-impl Drop for Pbar {
+impl<Iter: Iterator> Iterator for Tqdm<Iter> {
+    type Item = Iter::Item;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if let Some(next) = self.iter.next() {
+            if let Err(err) = self.update(1) {
+                eprintln!("{}", err);
+            }
+            Some(next)
+        } else {
+            None
+        }
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        self.iter.size_hint()
+    }
+}
+
+impl<Iter: Iterator> Deref for Tqdm<Iter> {
+    type Target = Iter;
+
+    fn deref(&self) -> &Self::Target {
+        &self.iter
+    }
+}
+
+impl<Iter: Iterator> DerefMut for Tqdm<Iter> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.iter
+    }
+}
+
+impl<T> Drop for Tqdm<T> {
     fn drop(&mut self) {
         if let Err(err) = self.close() {
             eprintln!("{}", err)
@@ -494,7 +534,14 @@ impl Info {
             Some(its) => format!("{:.02}", its),
         };
 
-        Ok(match self.total {
+        let total = match self.total {
+            None => None,
+            Some(total) => {
+                if total >= it { Some(total) } else { None }
+            },
+        };
+
+        Ok(match total {
             None => format_args!("{}{}it [{}, {}it/s]", desc, it, elapsed, its).to_string(),
 
             Some(total) => {
