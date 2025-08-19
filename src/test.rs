@@ -53,22 +53,22 @@ fn breaking() {
 
 #[test]
 
- fn dynamic_setting_desc() {
-     let mut pbar = tqdm(0..100);
-     for i in 0..100 {
-         thread::sleep(Duration::from_secs_f64(0.1));
-         pbar.update(1).unwrap();
-         pbar.set_desc(Some(format!("Processing {}", i))); 
-     }
- }
+fn dynamic_setting_desc() {
+    let mut pbar = tqdm(0..100);
+    for i in 0..100 {
+        thread::sleep(Duration::from_secs_f64(0.1));
+        pbar.update(1).unwrap();
+        pbar.set_desc(Some(format!("Processing {}", i)));
+    }
+}
 
 #[test]
 
- fn shorter_total() {
-     for _ in tqdm(0..100).total(Some(50)) {
-         thread::sleep(Duration::from_secs_f64(0.1));
-     }
- }
+fn shorter_total() {
+    for _ in tqdm(0..100).total(Some(50)) {
+        thread::sleep(Duration::from_secs_f64(0.1));
+    }
+}
 
 /* -------------------------------------------------------------------------- */
 /*                                  MULTI-BAR                                 */
@@ -129,6 +129,48 @@ fn nested() {
                 thread::sleep(Duration::from_millis(30));
             }
         }
+    }
+}
+
+/* -------------------------------------------------------------------------- */
+/*                                  COLOURS                                   */
+/* -------------------------------------------------------------------------- */
+
+#[test]
+fn test_colours() {
+    use crate::Colour;
+
+    for _ in tqdm(0..10).desc(Some("Red")).colour(Colour::Red) {
+        thread::sleep(Duration::from_millis(10));
+    }
+
+    for _ in tqdm(0..10).desc(Some("Green")).colour(Colour::Green) {
+        thread::sleep(Duration::from_millis(10));
+    }
+
+    for _ in tqdm(0..10).desc(Some("Blue")).colour(Colour::Blue) {
+        thread::sleep(Duration::from_millis(10));
+    }
+
+    for _ in tqdm(0..10).desc(Some("Yellow")).colour(Colour::Yellow) {
+        thread::sleep(Duration::from_millis(10));
+    }
+
+    for _ in tqdm(0..10).desc(Some("Cyan")).colour(Colour::Cyan) {
+        thread::sleep(Duration::from_millis(10));
+    }
+
+    for _ in tqdm(0..10).desc(Some("Magenta")).colour(Colour::Magenta) {
+        thread::sleep(Duration::from_millis(10));
+    }
+
+    for _ in tqdm(0..10).desc(Some("None Colour")).colour(Colour::None) {
+        thread::sleep(Duration::from_millis(10));
+    }
+
+    // Test that it still works without the colour config
+    for _ in tqdm(0..10).desc(Some("No Colour Config")) {
+        thread::sleep(Duration::from_millis(10));
     }
 }
 
