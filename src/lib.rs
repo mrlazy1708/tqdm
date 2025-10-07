@@ -4,7 +4,7 @@
 //! > "progress", and is an abbreviation for "I love you so much" in Spanish
 //! > (te quiero demasiado). Instantly make your loops show a smart progress
 //! > meter - just wrap any iterable with tqdm(iterable), and you're done!
-//! 
+//!
 
 use std::*;
 
@@ -26,7 +26,7 @@ use once_cell::sync::Lazy;
 mod test;
 
 pub mod style;
-pub use style::Style;
+pub use style::{Colour, Style};
 
 pub mod lib_async;
 pub use lib_async::tqdm_async;
@@ -112,35 +112,35 @@ fn create<T>(n: Option<usize>, iter: T) -> Tqdm<T> {
 /// This function creates a default progress bar object and registers it
 /// to the global collection. The returned iterator [Deref] to the given
 /// one and will update its tqdm whenever `next` is called.
-/// 
+///
 /// ## Examples
 /// ```
 /// use tqdm::tqdm;
-/// 
+///
 /// for i in tqdm(0..100) {
 ///     /* Your loop logic here */
 /// }
 /// ```
-/// 
+///
 pub fn tqdm<Iter: IntoIterator>(iterable: Iter) -> Tqdm<Iter::IntoIter> {
     let iter = iterable.into_iter();
     create(iter.size_hint().1, iter)
 }
 
 /// Manually create a progress bar.
-/// 
-/// 
+///
+///
 /// ## Examples
 /// ```
 /// use tqdm::pbar;
 /// let mut pbar = pbar(Some(44850));
-/// 
+///
 /// for i in 0..300 {
 ///     pbar.update(i).unwrap();
 ///     /* Your loop logic here */
 /// }
 /// ```
-/// 
+///
 pub fn pbar(total: Option<usize>) -> Tqdm<()> {
     create(total, ())
 }
@@ -198,7 +198,6 @@ pub struct Tqdm<T> {
 
 /// Builder patterns
 impl<T> Tqdm<T> {
-
     /// Configure progress bar's name.
     ///
     /// * `desc` bar description
@@ -210,12 +209,13 @@ impl<T> Tqdm<T> {
     /// ```
     /// tqdm(0..100).desc(Some("Bar1"))
     /// ```
-    /// 
+    ///
     pub fn desc<S: ToString>(self, desc: Option<S>) -> Self {
-        self.set_desc(desc); self
+        self.set_desc(desc);
+        self
     }
 
-        /// Configure progress bar's total.
+    /// Configure progress bar's total.
     ///
     /// * `total` total number of items
     ///     - `Some(n)`: Known length
@@ -226,7 +226,7 @@ impl<T> Tqdm<T> {
     /// ```
     /// tqdm(0..100).total(Some(50))
     /// ```
-    /// 
+    ///
     pub fn total(self, total: Option<usize>) -> Self {
         if let Ok(mut tqdm) = BAR.lock() {
             let info = tqdm.get_mut(&self.id);
@@ -249,7 +249,7 @@ impl<T> Tqdm<T> {
     /// ```
     /// tqdm(0..100).width(Some(100))
     /// ```
-    /// 
+    ///
     pub fn width(self, width: Option<usize>) -> Self {
         if let Ok(mut tqdm) = BAR.lock() {
             let info = tqdm.get_mut(&self.id);
@@ -270,12 +270,33 @@ impl<T> Tqdm<T> {
     /// ```
     /// tqdm(0..100).style(tqdm::Style::Balloon)
     /// ```
-    /// 
+    ///
     pub fn style(self, style: Style) -> Self {
         if let Ok(mut tqdm) = BAR.lock() {
             let info = tqdm.get_mut(&self.id);
             if let Some(info) = info {
                 info.config.style = style;
+            }
+        }
+
+        self
+    }
+
+    /// Configure progress bar's color.
+    ///
+    /// * `colour` bar color enum
+    ///
+    ///
+    /// ## Examples
+    /// ```
+    /// tqdm(0..100).colour(tqdm::Colour::Green)
+    /// ```
+    ///
+    pub fn colour(self, colour: Colour) -> Self {
+        if let Ok(mut tqdm) = BAR.lock() {
+            let info = tqdm.get_mut(&self.id);
+            if let Some(info) = info {
+                info.config.colour = colour;
             }
         }
 
@@ -291,7 +312,7 @@ impl<T> Tqdm<T> {
     /// ```
     /// tqdm(0..100).smoothing(0.9999)
     /// ```
-    /// 
+    ///
     pub fn smoothing(self, smoothing: f64) -> Self {
         if let Ok(mut tqdm) = BAR.lock() {
             let info = tqdm.get_mut(&self.id);
@@ -314,7 +335,7 @@ impl<T> Tqdm<T> {
     /// ```
     /// tqdm(0..100).clear(true)
     /// ```
-    /// 
+    ///
     pub fn clear(self, clear: bool) -> Self {
         if let Ok(mut tqdm) = BAR.lock() {
             let info = tqdm.get_mut(&self.id);
@@ -328,7 +349,6 @@ impl<T> Tqdm<T> {
 }
 
 impl<T> Tqdm<T> {
-
     /// Manually update the progress bar.
     pub fn update(&mut self, n: usize) -> Result<()> {
         self.step += n;
@@ -440,7 +460,7 @@ impl<T> Drop for Tqdm<T> {
 /// use tqdm::Iter;
 /// (0..).take(1000).tqdm()
 /// ```
-/// 
+///
 pub trait Iter<Item>: Iterator<Item = Item> {
     fn tqdm(self) -> Tqdm<Self>
     where
@@ -482,6 +502,7 @@ struct Config {
     desc: Option<String>,
     width: Option<usize>,
     style: style::Style,
+    colour: style::Colour,
     smoothing: f64,
     clear: bool,
 }
@@ -492,6 +513,7 @@ impl Default for Config {
             desc: None,
             width: None,
             style: Style::default(),
+            colour: Colour::default(),
             smoothing: 0.3,
             clear: false,
         }
@@ -537,6 +559,13 @@ impl Info {
                     Some(its) => ftime(((total - it) as f64 / its) as usize),
                 };
 
+                let colour_code = self.config.colour.ansi_code();
+                let reset_code = if colour_code.is_empty() {
+                    ""
+                } else {
+                    Colour::reset()
+                };
+
                 let bra_ = format!("{desc}{:>3}%|", (100.0 * pct) as usize);
                 let _ket = format!("| {it}/{total} [{elapsed}<{eta}, {its}it/s]");
                 let tqdm = {
@@ -569,7 +598,7 @@ impl Info {
                     }
                 };
 
-                format_args!("{bra_}{tqdm}{_ket}").to_string()
+                format_args!("{bra_}{colour_code}{tqdm}{reset_code}{_ket}").to_string()
             }
         })
     }

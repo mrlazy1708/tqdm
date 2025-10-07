@@ -8,12 +8,47 @@
 //!
 //! Other styles are open for [contribution](https://github.com/mrlazy1708/tqdm/issues/1).
 
+#[derive(Clone, Debug)]
+pub enum Colour {
+    None,
+    Red,
+    Green,
+    Yellow,
+    Blue,
+    Magenta,
+    Cyan,
+}
+
+impl Colour {
+    pub fn ansi_code(&self) -> &str {
+        match self {
+            Colour::None => "",
+            Colour::Red => "\x1b[31m",
+            Colour::Green => "\x1b[32m",
+            Colour::Yellow => "\x1b[33m",
+            Colour::Blue => "\x1b[34m",
+            Colour::Magenta => "\x1b[35m",
+            Colour::Cyan => "\x1b[36m",
+        }
+    }
+
+    pub fn reset() -> &'static str {
+        "\x1b[0m"
+    }
+}
+
+impl Default for Colour {
+    fn default() -> Self {
+        Colour::None
+    }
+}
+
 pub enum Style {
     ASCII,
     Block,
     Balloon,
     Pacman,
-    Custom(String)
+    Custom(String),
 }
 
 impl Default for Style {
@@ -24,12 +59,16 @@ impl Default for Style {
 
 impl std::fmt::Display for Style {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", match self {
-            Style::ASCII => "0123456789#",
-            Style::Block => " ▏▎▍▌▋▊▉█",
-            Style::Balloon => ".oO@*",
-            Style::Pacman => "C-",
-            Style::Custom(n) => &n[..],
-        })
+        write!(
+            f,
+            "{}",
+            match self {
+                Style::ASCII => "0123456789#",
+                Style::Block => " ▏▎▍▌▋▊▉█",
+                Style::Balloon => ".oO@*",
+                Style::Pacman => "C-",
+                Style::Custom(n) => &n[..],
+            }
+        )
     }
 }
