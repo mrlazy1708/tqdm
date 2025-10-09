@@ -282,10 +282,29 @@ impl<T> Tqdm<T> {
         self
     }
 
+    /// Configure progress bar's units.
+    ///
+    /// * `units` unit of measurement
+    ///
+    /// ## Examples
+    /// ```
+    /// tqdm(0..100).units("files")
+    /// ```
+    /// 
+    pub fn units<S: ToString>(self, units: S) -> Self {
+        if let Ok(mut tqdm) = BAR.lock() {
+            let info = tqdm.get_mut(&self.id);
+            if let Some(info) = info {
+                info.config.units = units.to_string();
+            }
+        }
+
+        self
+    }
+
     /// Configure progress bar's color.
     ///
     /// * `colour` bar color enum
-    ///
     ///
     /// ## Examples
     /// ```
@@ -502,6 +521,7 @@ struct Config {
     desc: Option<String>,
     width: Option<usize>,
     style: style::Style,
+    units: String,
     colour: style::Colour,
     smoothing: f64,
     clear: bool,
@@ -513,6 +533,7 @@ impl Default for Config {
             desc: None,
             width: None,
             style: Style::default(),
+            units: String::from("it"),
             colour: Colour::default(),
             smoothing: 0.3,
             clear: false,
@@ -540,6 +561,8 @@ impl Info {
             None => String::new(),
         };
 
+        let units = self.config.units.deref();
+
         let elapsed = ftime(t.duration_since(self.t0)?.as_secs_f64() as usize);
         let width = self.config.width.unwrap_or_else(|| size().0);
 
@@ -550,7 +573,7 @@ impl Info {
         };
 
         Ok(match self.total.filter(|&total| total >= it) {
-            None => format_args!("{desc}{it}it [{elapsed}, {its}it/s]").to_string(),
+            None => format_args!("{desc}{it}{units} [{elapsed}, {its}{units}/s]").to_string(),
 
             Some(total) => {
                 let pct = (it as f64 / total as f64).clamp(0.0, 1.0);
@@ -567,7 +590,7 @@ impl Info {
                 };
 
                 let bra_ = format!("{desc}{:>3}%|", (100.0 * pct) as usize);
-                let _ket = format!("| {it}/{total} [{elapsed}<{eta}, {its}it/s]");
+                let _ket = format!("| {it}/{total} [{elapsed}<{eta}, {its}i{units}/s]");
                 let tqdm = {
                     if let Style::Pacman = self.config.style {
                         let limit = (width.saturating_sub(bra_.len() + _ket.len()) / 3) * 3 - 6;
