@@ -16,7 +16,7 @@ categories = ["accessibility", "command-line-utilities"]
 
 [dependencies]
 anyhow = "1.0"
-crossterm = "0.25"
+crossterm = "0.29"
 
 [dependencies.once_cell]
 version = "1.18"
