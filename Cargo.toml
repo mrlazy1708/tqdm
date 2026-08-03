@@ -2,7 +2,7 @@
 name = "tqdm"
 edition = "2021"
 version = "0.8.0"
-rust-version = "1.60"
+rust-version = "1.75"
 
 readme = "README.md"
 license = "MIT OR Apache-2.0"
