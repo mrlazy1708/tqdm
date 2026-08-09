@@ -22,12 +22,7 @@ jobs:
             cargo-hack
             cargo-minimal-versions
           fallback: none
-      - run: |
-          cargo minimal-versions check \
-            --rust-version \
-            --workspace \
-            --all-targets \
-            --feature-powerset
+      - run: cargo minimal-versions check --rust-version --workspace --all-targets --feature-powerset
 
   test:
     strategy:
