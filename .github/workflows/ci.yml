@@ -5,6 +5,25 @@ on:
   pull_request:
 
 jobs:
+  msrv:
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - ubuntu-latest
+          - windows-latest
+          - macos-latest
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v3
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: |
+            cargo-hack
+            cargo-minimal-versions
+          fallback: none
+      - run: cargo minimal-versions check --rust-version --workspace --all-targets --feature-powerset
+
   test:
     strategy:
       matrix:
