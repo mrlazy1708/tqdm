@@ -1,4 +1,10 @@
-# tqdm <img alt="Crates.io Version" src="https://img.shields.io/crates/v/tqdm"> <img alt="Crates.io Downloads" src="https://img.shields.io/crates/d/tqdm"> <img alt="Crates.io MSRV" src="https://img.shields.io/crates/msrv/tqdm">
+# tqdm
+
+[![crates.io](https://img.shields.io/crates/v/tqdm.svg)](https://crates.io/crates/tqdm)
+[![downloads](https://img.shields.io/crates/d/tqdm.svg)](https://crates.io/crates/tqdm)
+[![docs.rs](https://docs.rs/tqdm/badge.svg)](https://docs.rs/tqdm)
+[![build status](https://github.com/mrlazy1708/tqdm/actions/workflows/ci.yml/badge.svg)](https://github.com/mrlazy1708/tqdm/actions)
+[![dependency status](https://deps.rs/repo/github/mrlazy1708/tqdm/status.svg)](https://deps.rs/repo/github/mrlazy1708/tqdm)
 
 >
 > Instantly make your loops show a smart progress meter - just wrap any iterable with tqdm(iterable), and you're done!
